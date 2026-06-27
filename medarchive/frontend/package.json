@@ -1,0 +1,14 @@
+{
+  "name": "medarchive-frontend",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Frontend placeholder for the MedArchive / MedPartners hackathon project.",
+  "scripts": {
+    "dev": "echo \"Bootstrap phase: frontend dev server is not wired yet.\"",
+    "build": "echo \"Bootstrap phase: frontend build is not wired yet.\"",
+    "lint": "echo \"Bootstrap phase: frontend lint is not wired yet.\"",
+    "test": "echo \"Bootstrap phase: no frontend tests are implemented yet.\""
+  },
+  "dependencies": {},
+  "devDependencies": {}
+}
