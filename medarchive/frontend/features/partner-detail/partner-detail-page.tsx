@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { ArrowLeft, CalendarDays, Mail, MapPin, Phone } from "lucide-react";
 
+import { CopyLinkButton } from "@/components/copy-link-button";
 import { LanguageSwitcher } from "@/components/language-switcher";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -24,6 +25,7 @@ export function PartnerDetailPage() {
           </Link>
           <div className="flex items-center gap-2">
             <LanguageSwitcher />
+            <CopyLinkButton variant="secondary" />
             <Button asChild variant="secondary">
               <a href="/dashboard">{t("detail.adminDashboard")}</a>
             </Button>

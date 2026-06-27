@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="630" viewBox="0 0 1200 630" role="img" aria-labelledby="title desc">
+  <title id="title">MedPrice</title>
+  <desc id="desc">Сравнение цен на медицинские услуги в Казахстане</desc>
+  <rect width="1200" height="630" fill="#0b1016"/>
+  <rect x="72" y="72" width="1056" height="486" rx="28" fill="#111a23" stroke="#263646"/>
+  <circle cx="174" cy="178" r="48" fill="#2dd4bf"/>
+  <path d="M174 142v72M138 178h72" stroke="#071116" stroke-width="18" stroke-linecap="round"/>
+  <text x="250" y="190" fill="#f8fafc" font-family="Arial, Helvetica, sans-serif" font-size="72" font-weight="700">MedPrice</text>
+  <text x="250" y="260" fill="#9fb0c3" font-family="Arial, Helvetica, sans-serif" font-size="34">Сравнение цен на медицинские услуги</text>
+  <text x="250" y="320" fill="#9fb0c3" font-family="Arial, Helvetica, sans-serif" font-size="34">в клиниках Казахстана</text>
+  <rect x="250" y="382" width="560" height="72" rx="14" fill="#0b1016" stroke="#263646"/>
+  <text x="284" y="428" fill="#d7e3ee" font-family="Arial, Helvetica, sans-serif" font-size="28">Поиск по услугам, городам и клиникам</text>
+</svg>

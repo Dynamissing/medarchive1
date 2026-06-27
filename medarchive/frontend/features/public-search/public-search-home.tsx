@@ -1,32 +1,84 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
+import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { ArrowRight, Building2, Search, Stethoscope } from "lucide-react";
 
+import { CopyLinkButton } from "@/components/copy-link-button";
 import { LanguageSwitcher } from "@/components/language-switcher";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { NoResults } from "@/components/ui/states";
 import { useI18n } from "@/i18n";
+import type { SeoLocale } from "@/lib/seo";
 import { cn } from "@/lib/utils";
 import { publicSearchResultsMock, quickExamples, topCategories, type PublicSearchResult } from "@/features/public-search/mock-data";
 
-export function PublicSearchHome() {
+const cityOptions = [
+  { value: "kazakhstan", label: "Казахстан" },
+  { value: "astana", label: "Astana" },
+  { value: "almaty", label: "Almaty" },
+];
+
+export function PublicSearchHome({ locale }: { locale?: SeoLocale }) {
   const { t } = useI18n();
-  const [query, setQuery] = useState("blood");
-  const [category, setCategory] = useState<string>("All");
+  const router = useRouter();
+  const pathname = usePathname();
+  const searchParams = useSearchParams();
+  const defaultQuery = locale ? "" : "blood";
+  const [query, setQuery] = useState(searchParams.get("q") ?? defaultQuery);
+  const [city, setCity] = useState(searchParams.get("city") ?? "kazakhstan");
+  const [category, setCategory] = useState<string>(searchParams.get("source") ?? "All");
+  const serviceId = searchParams.get("serviceId");
+  const clinicId = searchParams.get("clinicId");
+  const sort = searchParams.get("sort");
+
+  useEffect(() => {
+    setQuery(searchParams.get("q") ?? defaultQuery);
+    setCity(searchParams.get("city") ?? "kazakhstan");
+    setCategory(searchParams.get("source") ?? "All");
+  }, [defaultQuery, searchParams]);
 
   const results = useMemo(() => {
     const normalized = query.trim().toLowerCase();
     return publicSearchResultsMock.filter((result) => {
+      if (serviceId && result.id !== serviceId) return false;
+      if (clinicId && result.id !== clinicId) return false;
       const queryMatch =
         !normalized ||
         [result.title, result.subtitle, result.category].some((value) => value.toLowerCase().includes(normalized));
       const categoryMatch = category === "All" || result.category === category;
       return queryMatch && categoryMatch;
     });
-  }, [query, category]);
+  }, [category, clinicId, query, serviceId]);
+
+  function updateUrl(next: { q?: string; city?: string; source?: string }) {
+    const params = new URLSearchParams(searchParams.toString());
+    setParam(params, "q", next.q ?? query, defaultQuery);
+    setParam(params, "city", next.city ?? city, "kazakhstan");
+    setParam(params, "source", next.source ?? category, "All");
+    if (serviceId) params.set("serviceId", serviceId);
+    if (clinicId) params.set("clinicId", clinicId);
+    if (sort) params.set("sort", sort);
+    const nextUrl = params.toString() ? `${pathname}?${params.toString()}` : pathname;
+    router.replace(nextUrl, { scroll: false });
+  }
+
+  function handleQueryChange(value: string) {
+    setQuery(value);
+    updateUrl({ q: value });
+  }
+
+  function handleCityChange(value: string) {
+    setCity(value);
+    updateUrl({ city: value });
+  }
+
+  function handleCategoryChange(value: string) {
+    setCategory(value);
+    updateUrl({ source: value });
+  }
 
   return (
     <main className="min-h-screen bg-background">
@@ -66,14 +118,30 @@ export function PublicSearchHome() {
               <Input
                 className="h-14 rounded-md pl-12 text-base"
                 value={query}
-                onChange={(event) => setQuery(event.target.value)}
+                onChange={(event) => handleQueryChange(event.target.value)}
                 placeholder={t("public.placeholder")}
               />
             </div>
+            <label className="sr-only" htmlFor="city-filter">
+              City
+            </label>
+            <select
+              id="city-filter"
+              className="h-14 rounded-md border border-input bg-background/65 px-3 text-sm text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring md:w-44"
+              value={city}
+              onChange={(event) => handleCityChange(event.target.value)}
+            >
+              {cityOptions.map((option) => (
+                <option key={option.value} value={option.value}>
+                  {option.label}
+                </option>
+              ))}
+            </select>
             <Button className="h-14 px-5 text-base">
               {t("common.search")}
               <ArrowRight className="h-4 w-4" aria-hidden="true" />
             </Button>
+            <CopyLinkButton variant="secondary" className="h-14" />
           </div>
         </div>
 
@@ -84,7 +152,7 @@ export function PublicSearchHome() {
               key={example}
               type="button"
               className="rounded-md border border-border bg-secondary px-2.5 py-1 text-xs text-secondary-foreground transition-colors hover:bg-secondary/80 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-              onClick={() => setQuery(example)}
+              onClick={() => handleQueryChange(example)}
             >
               {example}
             </button>
@@ -102,7 +170,7 @@ export function PublicSearchHome() {
                   ? "border-primary/45 bg-primary/15 text-primary"
                   : "border-border bg-card text-muted-foreground hover:bg-secondary hover:text-foreground",
               )}
-              onClick={() => setCategory(item)}
+              onClick={() => handleCategoryChange(item)}
             >
               {categoryLabel(item, t)}
             </button>
@@ -116,7 +184,7 @@ export function PublicSearchHome() {
               <Badge variant="neutral">{results.length} {t("public.matches")}</Badge>
             </div>
             {results.length > 0 ? (
-              results.map((result) => <ResultCard key={result.id} result={result} />)
+              results.map((result) => <ResultCard key={result.id} result={result} city={city} locale={locale} />)
             ) : (
               <NoResults title={t("public.noResults.title")} description={t("public.noResults.description")} className="min-h-48 bg-card" />
             )}
@@ -136,8 +204,15 @@ export function PublicSearchHome() {
   );
 }
 
-function ResultCard({ result }: { result: PublicSearchResult }) {
+function ResultCard({ result, city, locale }: { result: PublicSearchResult; city: string; locale?: SeoLocale }) {
   const { t } = useI18n();
+  const localePrefix = locale ? `/${locale}` : "";
+  const detailHref =
+    result.id === "svc-001"
+      ? `${localePrefix}/services/complete-blood-count?city=${encodeURIComponent(city)}`
+      : result.id === "partner-07"
+        ? `${localePrefix}/clinics/clinic-07`
+        : `${localePrefix ? `${localePrefix}/search` : "/"}?${result.type === "service" ? "serviceId" : "clinicId"}=${encodeURIComponent(result.id)}&city=${encodeURIComponent(city)}`;
   return (
     <article className="rounded-lg border border-border bg-card p-4 shadow-surface">
       <div className="flex items-start justify-between gap-4">
@@ -160,14 +235,28 @@ function ResultCard({ result }: { result: PublicSearchResult }) {
         <Detail label={t("common.partners")} value={`${result.partnerCount}`} />
       </div>
       {result.id === "svc-001" || result.id === "partner-07" ? (
-        <div className="mt-4">
+        <div className="mt-4 flex flex-wrap gap-2">
           <Button asChild variant="secondary">
-            <a href={result.id === "svc-001" ? "/services/complete-blood-count" : "/partners/clinic-07"}>{t("public.openDetail")}</a>
+            <a href={detailHref}>{t("public.openDetail")}</a>
           </Button>
+          <CopyLinkButton href={detailHref} />
         </div>
-      ) : null}
+      ) : (
+        <div className="mt-4">
+          <CopyLinkButton href={detailHref} />
+        </div>
+      )}
     </article>
   );
+}
+
+function setParam(params: URLSearchParams, key: string, value: string, emptyValue: string) {
+  const cleaned = value.trim();
+  if (!cleaned || cleaned === emptyValue) {
+    params.delete(key);
+    return;
+  }
+  params.set(key, cleaned);
 }
 
 function Detail({ label, value }: { label: string; value: string }) {
