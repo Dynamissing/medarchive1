@@ -115,6 +115,8 @@ def test_reprocess_endpoint_enqueues_single_document(
     monkeypatch.setattr("app.api.routes.admin.process_document_task.delay", fake_delay)
     app.dependency_overrides[get_db] = override_get_db
     client = TestClient(app)
+    token = client.post("/admin/login", json={"username": "admin", "password": "admin"}).json()["access_token"]
+    client.headers.update({"Authorization": f"Bearer {token}"})
 
     response = client.post(f"/admin/import/documents/{document.id}/reprocess")
 

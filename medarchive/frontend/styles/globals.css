@@ -1,0 +1,76 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    --font-inter: Inter;
+    --radius: 0.5rem;
+    --background: 210 22% 7%;
+    --foreground: 205 28% 92%;
+    --card: 210 20% 10%;
+    --card-foreground: 205 28% 92%;
+    --popover: 210 20% 10%;
+    --popover-foreground: 205 28% 92%;
+    --primary: 176 58% 45%;
+    --primary-foreground: 183 74% 8%;
+    --secondary: 215 18% 17%;
+    --secondary-foreground: 204 24% 88%;
+    --muted: 214 17% 15%;
+    --muted-foreground: 210 12% 62%;
+    --accent: 206 48% 22%;
+    --accent-foreground: 203 50% 92%;
+    --destructive: 358 72% 56%;
+    --destructive-foreground: 0 0% 98%;
+    --border: 214 16% 20%;
+    --input: 214 16% 20%;
+    --ring: 176 58% 45%;
+    --success: 153 54% 48%;
+    --success-foreground: 156 72% 9%;
+    --success-subtle: 153 45% 13%;
+    --warning: 39 91% 58%;
+    --warning-foreground: 36 88% 9%;
+    --warning-subtle: 35 48% 14%;
+    --info: 205 82% 62%;
+    --info-foreground: 209 86% 9%;
+    --info-subtle: 207 46% 14%;
+  }
+
+  * {
+    @apply border-border;
+  }
+
+  body {
+    @apply min-h-screen bg-background font-sans text-foreground antialiased;
+  }
+
+  h1 {
+    @apply text-2xl font-semibold tracking-normal text-foreground;
+  }
+
+  h2 {
+    @apply text-lg font-semibold tracking-normal text-foreground;
+  }
+
+  h3 {
+    @apply text-sm font-semibold tracking-normal text-foreground;
+  }
+
+  p {
+    @apply text-sm leading-6 text-muted-foreground;
+  }
+}
+
+@layer components {
+  .surface-card {
+    @apply rounded-lg border border-border bg-card text-card-foreground shadow-surface;
+  }
+
+  .table-shell {
+    @apply overflow-x-auto rounded-lg border border-border bg-card;
+  }
+
+  .table-row-spacing {
+    @apply h-12 px-4 align-middle;
+  }
+}

@@ -1,6 +1,14 @@
 # Frontend
 
-TypeScript frontend placeholder for MedArchive / MedPartners.
+Next.js + Tailwind dark theme foundation for MedArchive / MedPartners.
 
-The UI is intentionally not implemented in the bootstrap phase. Add framework dependencies and screens after the first product slice is defined.
+## Commands
 
+```bash
+npm install
+npm run dev
+npm run build
+npm run typecheck
+```
+
+The app uses static local data for this phase and does not require backend availability.

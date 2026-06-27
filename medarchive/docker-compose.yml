@@ -1,6 +1,7 @@
 services:
   postgres:
     image: postgres:16-alpine
+    restart: unless-stopped
     environment:
       POSTGRES_DB: medarchive
       POSTGRES_USER: medarchive
@@ -9,10 +10,107 @@ services:
       - "5432:5432"
     volumes:
       - medarchive_postgres:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U medarchive -d medarchive"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
   redis:
     image: redis:7-alpine
+    restart: unless-stopped
     ports:
       - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  backend:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+    restart: unless-stopped
+    environment:
+      APP_NAME: "${APP_NAME:-MedArchive / MedPartners}"
+      APP_VERSION: "${APP_VERSION:-0.1.0}"
+      APP_ENV: "${APP_ENV:-local}"
+      APP_DEBUG: "${APP_DEBUG:-false}"
+      APP_LOG_LEVEL: "${APP_LOG_LEVEL:-INFO}"
+      BACKEND_HOST: 0.0.0.0
+      BACKEND_PORT: 8000
+      DATABASE_URL: postgresql+psycopg://medarchive:medarchive@postgres:5432/medarchive
+      REDIS_URL: redis://redis:6379/0
+      CELERY_TASK_ALWAYS_EAGER: "${CELERY_TASK_ALWAYS_EAGER:-false}"
+      FILE_STORAGE_ROOT: /app/data/storage
+      ADMIN_USERNAME: "${ADMIN_USERNAME:-admin}"
+      ADMIN_PASSWORD: "${ADMIN_PASSWORD:-admin}"
+      ADMIN_TOKEN_SECRET: "${ADMIN_TOKEN_SECRET:-change-me-for-demo}"
+      ADMIN_TOKEN_TTL_SECONDS: "${ADMIN_TOKEN_TTL_SECONDS:-3600}"
+      MATCH_AUTO_ACCEPT_THRESHOLD: "${MATCH_AUTO_ACCEPT_THRESHOLD:-0.94}"
+      MATCH_NEEDS_REVIEW_THRESHOLD: "${MATCH_NEEDS_REVIEW_THRESHOLD:-0.72}"
+      MATCH_ENABLE_EMBEDDINGS: "${MATCH_ENABLE_EMBEDDINGS:-false}"
+      MATCH_ENABLE_OPENROUTER: "${MATCH_ENABLE_OPENROUTER:-false}"
+      OPENROUTER_API_KEY: "${OPENROUTER_API_KEY:-}"
+      CURRENCY_CONVERSION_RATES: "${CURRENCY_CONVERSION_RATES:-{}}"
+    ports:
+      - "8000:8000"
+    volumes:
+      - .:/app
+      - medarchive_storage:/app/data/storage
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    command: ["python", "-m", "uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
+
+  worker:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+    restart: unless-stopped
+    environment:
+      APP_NAME: "${APP_NAME:-MedArchive / MedPartners}"
+      APP_VERSION: "${APP_VERSION:-0.1.0}"
+      APP_ENV: "${APP_ENV:-local}"
+      APP_DEBUG: "${APP_DEBUG:-false}"
+      APP_LOG_LEVEL: "${APP_LOG_LEVEL:-INFO}"
+      DATABASE_URL: postgresql+psycopg://medarchive:medarchive@postgres:5432/medarchive
+      REDIS_URL: redis://redis:6379/0
+      CELERY_TASK_ALWAYS_EAGER: "${CELERY_TASK_ALWAYS_EAGER:-false}"
+      FILE_STORAGE_ROOT: /app/data/storage
+      ADMIN_USERNAME: "${ADMIN_USERNAME:-admin}"
+      ADMIN_PASSWORD: "${ADMIN_PASSWORD:-admin}"
+      ADMIN_TOKEN_SECRET: "${ADMIN_TOKEN_SECRET:-change-me-for-demo}"
+      ADMIN_TOKEN_TTL_SECONDS: "${ADMIN_TOKEN_TTL_SECONDS:-3600}"
+      MATCH_AUTO_ACCEPT_THRESHOLD: "${MATCH_AUTO_ACCEPT_THRESHOLD:-0.94}"
+      MATCH_NEEDS_REVIEW_THRESHOLD: "${MATCH_NEEDS_REVIEW_THRESHOLD:-0.72}"
+      MATCH_ENABLE_EMBEDDINGS: "${MATCH_ENABLE_EMBEDDINGS:-false}"
+      MATCH_ENABLE_OPENROUTER: "${MATCH_ENABLE_OPENROUTER:-false}"
+      OPENROUTER_API_KEY: "${OPENROUTER_API_KEY:-}"
+      CURRENCY_CONVERSION_RATES: "${CURRENCY_CONVERSION_RATES:-{}}"
+    volumes:
+      - .:/app
+      - medarchive_storage:/app/data/storage
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    command: ["celery", "-A", "app.workers.celery_app.celery_app", "worker", "--loglevel=info"]
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    ports:
+      - "3000:80"
+    depends_on:
+      - backend
 
 volumes:
   medarchive_postgres:
+  medarchive_storage:

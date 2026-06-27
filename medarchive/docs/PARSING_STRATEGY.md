@@ -16,6 +16,7 @@ Define how archive files will eventually be converted into structured metadata a
 - Extracted row normalization is implemented as deterministic parse-ready payload construction.
 - Only synthetic or approved sample files should be used during development.
 - Parser outputs should be typed and validated before being stored or matched.
+- Backend parser tests use lightweight synthetic XLSX, DOCX, text-PDF, and scanned-PDF fixtures generated in temporary directories.
 
 ## Service Directory Import
 

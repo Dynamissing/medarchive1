@@ -15,9 +15,9 @@
 - [x] Add SQLAlchemy base/session setup.
 - [x] Initialize Alembic with an empty migration.
 - [x] Add `/health` smoke endpoint and test.
-- [ ] Define synthetic sample data shape.
-- [ ] Draft initial API contract.
-- [ ] Add first frontend shell.
+- [x] Define synthetic sample data shape.
+- [x] Draft initial API contract.
+- [x] Add first frontend shell.
 - [ ] Add full lint/type-check commands.
 
 ## Later Phases
@@ -38,5 +38,9 @@
 - [x] Implement validation, anomalies, price versioning, and deduplication.
 - [x] Implement Celery/Redis worker pipeline and reprocessing.
 - [x] Implement public API search endpoints.
-- [ ] Add quality report generation.
-- [ ] Prepare demo flow.
+- [x] Implement admin API endpoints.
+- [x] Implement simple admin authentication.
+- [x] Strengthen backend tests and sample fixtures.
+- [x] Add Docker Compose and local run scripts.
+- [x] Add quality report generation.
+- [x] Prepare demo flow.

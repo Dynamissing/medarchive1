@@ -184,6 +184,10 @@ Commands run:
 - `pytest -q`
 - `python -m compileall -q app tests`
 - `alembic heads`
+- `git diff --stat`
+- `git status --short`
+- `git diff --stat`
+- `git status --short`
 - `alembic upgrade head --sql`
 - `alembic upgrade head`
 - `python scripts\import_services.py --help`
@@ -846,3 +850,276 @@ Known limitations:
 - Partner records are derived from active `price_item_versions.partner_name`; no dedicated partner table exists yet.
 - Runtime search uses portable SQL `ILIKE`-style filtering for testability; PostgreSQL FTS/trigram support is provided as indexes for PostgreSQL deployments.
 - Public endpoints expose read models only and do not include admin review workflow actions.
+
+## 2026-06-27 - Admin API Endpoints
+
+Implemented typed admin operational endpoints without changing database models.
+
+Created files:
+
+- `backend/tests/api/test_admin_api.py`
+
+Modified files:
+
+- `backend/app/api/routes/admin.py`
+- `docs/API.md`
+- `docs/ARCHITECTURE.md`
+- `docs/PROJECT_STATE.md`
+- `docs/TASKS.md`
+- `docs/IMPLEMENTATION_LOG.md`
+
+Behavior changes:
+
+- Added `POST /admin/import/services` for XLSX/JSON service directory import.
+- Added `GET /admin/import-batches` for archive batch summaries.
+- Added `GET /admin/documents` and `GET /admin/documents/{id}` for document status, file metadata, parsed summary, warnings, and processing events.
+- Added canonical `POST /admin/documents/{id}/reprocess` while preserving the previous import-scoped reprocess route.
+- Added `GET /admin/verification` for verification actions joined with anomaly details.
+- Added `GET /unmatched` for unmatched matching candidates.
+- Added `POST /match` for matching one normalized row payload.
+- Added `POST /admin/price-items/{id}/verify` and `POST /admin/price-items/{id}/reject`.
+- Added `GET /admin/dashboard` operational metrics.
+- Added `GET /admin/reports/quality` aggregate quality metrics.
+- Added `GET /admin/files/{id}/preview` to serve stored local file assets by id.
+
+Commands run:
+
+- `pytest -q backend/tests/api/test_admin_api.py`
+- `pytest -q`
+- `python -m compileall -q app tests`
+- `alembic heads`
+
+Verification results:
+
+- Focused admin API tests passed with `5 passed`.
+- Full backend test suite passed with `56 passed`.
+- Python compile check passed.
+- Alembic head remains `a7b8c9d0e1f2`; no migration was required for this phase.
+- `git diff --stat` reported 6 tracked files changed with 628 insertions and 14 deletions; `backend/tests/api/test_admin_api.py` is untracked and therefore not included in that stat.
+- `git status --short` showed modified admin/docs files and untracked `backend/tests/api/test_admin_api.py`.
+
+Known limitations:
+
+- Admin endpoints do not implement authentication or authorization.
+- File preview serves only known stored file assets by id, but no content redaction is implemented.
+- Verify/reject actions are minimal status operations and do not implement a full review workflow.
+- Dashboard and quality report payloads are aggregate read models, not finalized product analytics.
+
+## 2026-06-27 - Simple Admin Authentication
+
+Implemented environment-configured admin login with signed bearer-token protection for admin routes.
+
+Created files:
+
+- `backend/app/core/auth.py`
+- `backend/tests/api/test_admin_auth.py`
+
+Modified files:
+
+- `.env.example`
+- `backend/app/api/routes/admin.py`
+- `backend/app/core/config.py`
+- `backend/app/main.py`
+- `backend/tests/api/test_admin_api.py`
+- `backend/tests/integration/test_archive_import.py`
+- `backend/tests/integration/test_worker_pipeline.py`
+- `docs/API.md`
+- `docs/ARCHITECTURE.md`
+- `docs/PROJECT_STATE.md`
+- `docs/TASKS.md`
+- `docs/IMPLEMENTATION_LOG.md`
+
+Behavior changes:
+
+- Added `POST /admin/login` returning a signed bearer token.
+- Added admin credentials and token settings from environment: `ADMIN_USERNAME`, `ADMIN_PASSWORD`, `ADMIN_TOKEN_SECRET`, and `ADMIN_TOKEN_TTL_SECONDS`.
+- Added router-level bearer-token guard for admin endpoints.
+- Left public endpoints open, including `/health`, `/services`, `/partners`, and `/search`.
+- OpenAPI now exposes HTTP bearer authentication for Swagger admin route testing.
+- Existing admin API and integration tests were updated to authenticate before calling protected endpoints.
+
+Commands run:
+
+- `pytest -q backend/tests/api/test_admin_auth.py`
+- `pytest -q backend/tests/api/test_admin_api.py`
+- `pytest -q backend/tests/api/test_admin_auth.py backend/tests/api/test_admin_api.py`
+- `pytest -q backend/tests/integration/test_archive_import.py backend/tests/integration/test_worker_pipeline.py`
+- `pytest -q`
+- `python -m compileall -q app tests`
+- `alembic heads`
+
+Verification results:
+
+- Focused admin auth tests passed with `5 passed`.
+- Focused admin API tests passed with `5 passed`.
+- Combined affected admin API/auth tests passed with `10 passed`.
+- Affected archive/worker integration tests passed with `5 passed`.
+- Full backend test suite passed with `61 passed`.
+- Python compile check passed.
+- Alembic head remains `a7b8c9d0e1f2`; no migration was required for this phase.
+- `git diff --stat` reported 11 tracked files changed with 764 insertions and 15 deletions, including previously uncommitted admin-route changes.
+- `git status --short` showed new untracked files `backend/app/core/auth.py`, `backend/tests/api/test_admin_api.py`, and `backend/tests/api/test_admin_auth.py`.
+
+Known limitations:
+
+- This is single-admin authentication only; no multi-user RBAC or user database is implemented.
+- Tokens are signed with a shared environment secret and cannot be revoked individually before expiry.
+- Default demo credentials must be changed outside local development.
+
+## 2026-06-27 - Backend Tests And Sample Fixtures
+
+Strengthened backend test coverage with lightweight synthetic fixtures and additional branch/integration tests.
+
+Created files:
+
+- `backend/tests/fixtures/__init__.py`
+- `backend/tests/fixtures/generators.py`
+- `backend/tests/fixtures/README.md`
+- `backend/tests/unit/test_parser_fixtures.py`
+- `backend/tests/unit/test_matching_validation_branches.py`
+- `backend/tests/integration/test_archive_processing_happy_path.py`
+
+Modified files:
+
+- `docs/PARSING_STRATEGY.md`
+- `docs/PROJECT_STATE.md`
+- `docs/TASKS.md`
+- `docs/IMPLEMENTATION_LOG.md`
+
+Behavior changes:
+
+- Added synthetic fixture generators for XLSX, DOCX, text PDF, scanned-PDF, OCR data, and ZIP archive samples.
+- Added parser fixture smoke coverage across XLSX, DOCX, text PDF, and OCR-candidate PDF paths.
+- Added matching branch coverage for unmatched candidate persistence.
+- Added validation branch coverage for document-level no-data issues and local currency conversion.
+- Added archive processing happy-path integration coverage from ZIP import through synchronous worker processing.
+- Documented fixture-generation rules in `backend/tests/fixtures/README.md`.
+
+Commands run:
+
+- `pytest -q backend/tests/unit/test_parser_fixtures.py backend/tests/unit/test_matching_validation_branches.py`
+- `pytest -q backend/tests/integration/test_archive_processing_happy_path.py`
+- `pytest -q`
+- `python -m compileall -q app tests`
+- `alembic heads`
+
+Verification results:
+
+- Focused parser/matching/validation fixture tests passed with `3 passed`.
+- Focused archive processing happy-path test passed with `1 passed`.
+- Full backend test suite passed with `65 passed`.
+- Python compile check passed.
+- Alembic head remains `a7b8c9d0e1f2`; no migration was required for this phase.
+
+Known limitations:
+
+- Fixtures are synthetic and intentionally small; they do not replace approved real-file regression samples.
+- OCR tests mock local OCR tooling and do not require Poppler or Tesseract language packs in CI.
+- The archive processing happy path verifies parser orchestration and events, not downstream matching/validation persistence.
+
+## 2026-06-27 - Docker Compose And Local Run Scripts
+
+Added a production-like local developer stack and convenience Make targets.
+
+Created files:
+
+- `.dockerignore`
+- `backend/Dockerfile`
+- `frontend/index.html`
+
+Modified files:
+
+- `README.md`
+- `Makefile`
+- `docker-compose.yml`
+- `docs/PROJECT_STATE.md`
+- `docs/TASKS.md`
+- `docs/IMPLEMENTATION_LOG.md`
+
+Behavior changes:
+
+- Docker Compose now defines `postgres`, `redis`, `backend`, `worker`, and `frontend` services.
+- Backend and worker use the same Python image and explicit environment wiring.
+- Frontend serves a lightweight static placeholder through Nginx on port `3000`.
+- Added persistent Docker volumes for Postgres and local file storage.
+- Added Make targets: `up`, `down`, `migrate`, `import-services`, `import-archive`, and `run-tests`.
+- README quickstart now documents Compose startup, migrations, local URLs, test command, and one-command import flow.
+
+Commands run:
+
+- `docker compose config`
+- `docker compose up -d --build`
+- `pytest -q`
+- `python -m compileall -q app tests`
+
+Verification results:
+
+- `docker compose config` passed and rendered the full stack configuration.
+- `docker compose up -d --build` could not start because Docker Desktop's Linux engine pipe was unavailable on this machine.
+- Backend test suite passed with `65 passed`.
+- Python compile check passed.
+
+Known limitations:
+
+- Backend/frontend availability could not be confirmed because the Docker engine was not running in this environment.
+- The frontend service is a static placeholder, not a product UI.
+- Make import targets expect `FILE` paths that are visible inside the backend container, usually under `/app`.
+
+## 2026-06-27 - Final Integration Hardening
+
+Hardened demo readiness with small API, script, and documentation fixes.
+
+Created files:
+
+- None. Generated demo artifacts under `data/samples/` during verification were removed after smoke testing because `scripts/seed_demo_data.py` can recreate them.
+
+Modified files:
+
+- `README.md`
+- `backend/app/api/routes/admin.py`
+- `docs/API.md`
+- `docs/ARCHITECTURE.md`
+- `docs/DEMO_SCRIPT.md`
+- `docs/PROJECT_STATE.md`
+- `docs/TASKS.md`
+- `docs/IMPLEMENTATION_LOG.md`
+- `frontend/README.md`
+- `scripts/generate_quality_report.py`
+- `scripts/reprocess_document.py`
+- `scripts/seed_demo_data.py`
+
+Behavior changes:
+
+- Admin list endpoints now validate `page` and `page_size` through FastAPI `Query` metadata and expose `status` as the documented status filter.
+- `scripts/seed_demo_data.py` now creates a synthetic service directory JSON, demo XLSX price workbook, and ZIP archive for local demo imports.
+- `scripts/generate_quality_report.py` now prints aggregate parsing, matching, validation, and price-history metrics as JSON.
+- `scripts/reprocess_document.py` now synchronously resets and processes one price document by UUID for local fallback demos.
+- README, API docs, project state, task list, frontend notes, and demo script were updated to reflect the current backend and executable demo flow.
+
+Commands run:
+
+- `python scripts\seed_demo_data.py`
+- `python -m compileall -q app tests ..\scripts`
+- `docker compose config --quiet`
+- `pytest -q`
+- Manual in-memory demo smoke: service import, archive import, synchronous batch processing, `/health`, and `/search?q=blood&type=service`
+- `docker compose up -d --build`
+- `git diff --stat`
+- `git status --short`
+
+Verification results:
+
+- Demo generator created `services.json`, `demo_partner_prices.xlsx`, and `archive.zip` successfully during verification.
+- Compile check passed.
+- Docker Compose configuration validation passed.
+- Full backend test suite passed with `65 passed`.
+- Manual in-memory demo smoke imported 3 services, processed 1 archive document to `parsed`, produced 3 XLSX row candidates, returned `/health` 200, and returned one public service search result for `blood`.
+- `docker compose up -d --build` could not start because Docker Desktop's Linux engine pipe was unavailable on this machine.
+- `git diff --stat` reported 20 tracked files changed with 1326 insertions and 76 deletions, including changes from previous uncommitted phases.
+
+Known limitations:
+
+- Live backend/frontend container availability could not be confirmed because Docker Desktop was not running.
+- Frontend remains a static placeholder, not a full review UI.
+- The demo data is synthetic; real attached XLSX/ZIP files still require approved-data verification on a running local stack.
+- Generated demo files are not committed and should be recreated with `python scripts/seed_demo_data.py` before running the documented import flow.

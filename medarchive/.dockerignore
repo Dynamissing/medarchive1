@@ -1,0 +1,7 @@
+.git
+**/__pycache__/
+**/.pytest_cache/
+**/*.pyc
+backend/medarchive_backend.egg-info/
+data/storage/
+frontend/node_modules/

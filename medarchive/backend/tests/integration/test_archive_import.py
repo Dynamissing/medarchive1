@@ -93,6 +93,8 @@ def test_archive_upload_endpoint_creates_batch_assets_and_documents(
 
     app.dependency_overrides[get_db] = override_get_db
     client = TestClient(app)
+    token = client.post("/admin/login", json={"username": "admin", "password": "admin"}).json()["access_token"]
+    client.headers.update({"Authorization": f"Bearer {token}"})
 
     with archive_path.open("rb") as archive_file:
         response = client.post(

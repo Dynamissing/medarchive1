@@ -2,7 +2,7 @@
 
 ## Status
 
-Backend foundation, service-directory import, archive ZIP ingestion, parser selection, spreadsheet extraction, DOCX extraction, text-PDF extraction, OCR-assisted PDF extraction, deterministic extracted-row normalization, layered matching, validation, anomaly flagging, price versioning, Celery/Redis worker orchestration, and read-only public search APIs are in place. The repository has the expected scaffold, a minimal FastAPI app, health/admin import endpoints, public service/partner/search endpoints, settings, structured logging, SQLAlchemy setup, Alembic migrations, XLSX/JSON service import support, ZIP storage registration, spreadsheet parsers, DOCX parser, text-PDF parser, isolated OCR-candidate parser, parse-ready row normalization utilities, deterministic-first matching, history tables, and structured processing events.
+Backend foundation, service-directory import, archive ZIP ingestion, parser selection, spreadsheet extraction, DOCX extraction, text-PDF extraction, OCR-assisted PDF extraction, deterministic extracted-row normalization, layered matching, validation, anomaly flagging, price versioning, Celery/Redis worker orchestration, read-only public search APIs, admin operational APIs, and simple admin bearer-token auth are in place. The repository has the expected scaffold, a minimal FastAPI app, authenticated admin endpoints, public service/partner/search endpoints, settings, structured logging, SQLAlchemy setup, Alembic migrations, XLSX/JSON service import support, ZIP storage registration, spreadsheet parsers, DOCX parser, text-PDF parser, isolated OCR-candidate parser, parse-ready row normalization utilities, deterministic-first matching, history tables, and structured processing events.
 
 ## Implemented
 
@@ -37,20 +37,24 @@ Backend foundation, service-directory import, archive ZIP ingestion, parser sele
 - Admin enqueue endpoints for batch processing and document reprocessing.
 - Read-only public endpoints for services, partners, partner-service relationships, and search.
 - PostgreSQL `pg_trgm`/FTS search indexes for service and partner search when running on PostgreSQL.
-- Minimal frontend TypeScript package placeholder.
-- Script placeholders.
+- Admin endpoints for service import, import batches, documents, document reprocessing, verification, unmatched candidates, matching, price item verify/reject, dashboard metrics, quality report metrics, and local file preview.
+- `POST /admin/login` with environment-configured username/password and signed bearer tokens for admin endpoints.
+- Lightweight synthetic backend fixtures and tests covering parser formats, matching/validation branches, API smoke paths, and archive processing happy path.
+- Production-like local Docker Compose stack for Postgres, Redis, backend, worker, and frontend placeholder.
+- Make targets for stack control, migrations, imports, and tests.
+- Minimal static frontend placeholder.
+- Operational scripts for import, synchronous reprocessing, quality metrics, and synthetic demo data generation.
 - Planning documentation.
 
 ## Not Implemented
 
-- Business logic.
-- Domain APIs beyond `/health`.
-- Domain APIs beyond admin archive import.
-- Domain models beyond imported service and archive storage tables.
-- External OCR APIs, matching/validation review APIs, admin review workflows, and a dedicated partner table.
-- Authentication, authorization, and audit behavior.
-- UI screens.
+- Full production review workflows.
+- Dedicated partner table; partner read models are derived from active price versions.
+- Full frontend user workflows.
+- External OCR APIs, production LLM review, and live currency conversion providers.
+- Multi-user authentication, RBAC, and audit behavior.
+- Real approved golden-data import has not been verified in this environment.
 
 ## Immediate Next Step
 
-Install Poppler/Tesseract language packs and LibreOffice for local verification, run PostgreSQL/Redis locally, and then wire review APIs or quality report generation around persisted matches, anomalies, and price history.
+Start Docker Desktop, run the local Compose stack, generate synthetic demo data with `python scripts/seed_demo_data.py`, run migrations, import the demo service directory and archive, then process the batch and verify public search plus admin dashboard/quality report responses.

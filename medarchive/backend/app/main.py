@@ -5,6 +5,7 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 
+from app.api.routes.admin import login_router as admin_login_router
 from app.api.routes.admin import router as admin_router
 from app.api.routes.health import router as health_router
 from app.api.routes.public import router as public_router
@@ -35,6 +36,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         debug=app_settings.debug,
         lifespan=build_lifespan(app_settings),
     )
+    app.include_router(admin_login_router)
     app.include_router(admin_router)
     app.include_router(health_router)
     app.include_router(public_router)

@@ -21,10 +21,12 @@ MedArchive / MedPartners is intended to help teams organize medical archive file
 - Validation/history: deterministic validation rules, anomaly flags, verification actions, and active/inactive price item versions with supersede chains.
 - Worker pipeline: Celery/Redis orchestration for batch processing, per-document processing, reprocessing, progress updates, and structured processing events.
 - Public API: read-only service, partner, and search endpoints.
-- API: `GET /health`, `POST /admin/import/archive`, worker enqueue endpoints, and public search endpoints.
+- Admin API: service directory import, import batch/document inspection, reprocessing, verification, matching, dashboard, quality report, and safe file preview endpoints.
+- Admin auth: simple environment-configured username/password login with signed bearer tokens for admin endpoints.
+- API: `GET /health`, admin operational endpoints, worker enqueue endpoints, and public search endpoints.
 - Frontend: placeholder TypeScript application directory under `frontend`.
 - Data: local-only fixture and sample directories.
-- Scripts: placeholders for import, conversion, reprocessing, demo seeding, and quality reporting.
+- Scripts: local helpers for import, conversion, synchronous reprocessing, demo data generation, and quality reporting.
 - Docs: project planning and implementation notes.
 
 ## Target Boundaries
@@ -38,6 +40,8 @@ MedArchive / MedPartners is intended to help teams organize medical archive file
 - External model-assisted matching must stay optional and explainable.
 - Frontend should consume documented API contracts after they are defined.
 - Public endpoints should remain read-only and stable.
+- Admin endpoints should use explicit typed request/response schemas and avoid changing persistence models casually.
+- Admin authentication should remain simple for the hackathon demo and should not introduce a user database or RBAC until required.
 - Scripts should call reusable backend modules once business logic exists.
 - File storage should remain local and configurable until production storage requirements are defined.
 

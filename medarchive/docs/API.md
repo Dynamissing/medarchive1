@@ -2,7 +2,7 @@
 
 ## Status
 
-The backend exposes health, archive import, worker enqueue, and read-only public search endpoints. Admin review APIs remain undefined.
+The backend exposes health, read-only public search endpoints, and authenticated typed admin operational endpoints.
 
 ## Implemented Endpoints
 
@@ -21,6 +21,35 @@ Example response:
 }
 ```
 
+## Admin Authentication
+
+Admin endpoints require a bearer token from `POST /admin/login`. Public endpoints such as `/health`, `/services`, `/partners`, and `/search` remain open.
+
+### `POST /admin/login`
+
+Authenticates against `ADMIN_USERNAME` and `ADMIN_PASSWORD` from environment settings.
+
+Request:
+
+```json
+{
+  "username": "admin",
+  "password": "admin"
+}
+```
+
+Example response:
+
+```json
+{
+  "access_token": "signed-token",
+  "token_type": "bearer",
+  "expires_in": 3600
+}
+```
+
+Use the token as `Authorization: Bearer <access_token>`. Swagger/OpenAPI exposes bearer authentication for admin route testing.
+
 ### `POST /admin/import/archive`
 
 Accepts a multipart ZIP upload and registers archive storage rows. The endpoint preserves the original ZIP, extracts member files into local storage, and creates pending price-document records. It does not parse file contents.
@@ -37,6 +66,24 @@ Example response:
   "original_asset_id": "00000000-0000-0000-0000-000000000000",
   "extracted_files": 10,
   "price_documents": 10,
+  "warnings": []
+}
+```
+
+### `POST /admin/import/services`
+
+Uploads an XLSX or JSON service directory and imports services/synonyms.
+
+Example response:
+
+```json
+{
+  "batch": "service-import-batch",
+  "source_path": "data/storage/service-imports/services.json",
+  "rows_seen": 10,
+  "imported": 10,
+  "updated": 0,
+  "skipped": 0,
   "warnings": []
 }
 ```
@@ -68,6 +115,72 @@ Example response:
   "target_type": "price_document"
 }
 ```
+
+The canonical document reprocess endpoint is now `POST /admin/documents/{price_document_id}/reprocess`; the older import-scoped path remains available for compatibility.
+
+### `GET /admin/import-batches`
+
+Lists archive import batches with document counters and warnings.
+
+Query parameters:
+
+- `page`, `page_size`
+- `status`: optional import-batch status filter.
+
+### `GET /admin/documents`
+
+Lists price documents with file metadata, parser status, progress, attempts, warnings, and parsed summary.
+
+Query parameters:
+
+- `page`, `page_size`
+- `status`: optional price-document status filter.
+- `import_batch_id`: optional batch UUID filter.
+
+### `GET /admin/documents/{id}`
+
+Returns one price document plus processing events.
+
+### `GET /admin/verification`
+
+Lists verification actions joined with anomaly details.
+
+Query parameters:
+
+- `page`, `page_size`
+- `status`: optional verification-action status filter.
+
+### `GET /unmatched`
+
+Lists unmatched matching candidates for review.
+
+Query parameters:
+
+- `page`, `page_size`
+
+### `POST /match`
+
+Runs the matching engine for one normalized row payload and returns ranked candidates.
+
+### `POST /admin/price-items/{id}/verify`
+
+Marks related anomaly flags resolved and records a completed verification action.
+
+### `POST /admin/price-items/{id}/reject`
+
+Marks a price item inactive and records a completed rejection action.
+
+### `GET /admin/dashboard`
+
+Returns practical operational counts for batches, documents, verification, anomalies, unmatched candidates, and active price items.
+
+### `GET /admin/reports/quality`
+
+Returns aggregate parsing, matching, validation, and price-history quality metrics.
+
+### `GET /admin/files/{id}/preview`
+
+Serves the stored local file for a known file asset id.
 
 ### `GET /services`
 
@@ -111,21 +224,13 @@ Query parameters:
 - `type`: optional `service` or `partner`
 - `page`, `page_size`
 
-## Planned Areas
-
-- Health and readiness checks.
-- Document metadata lookup.
-- Parsing status.
-- Candidate service or partner matches.
-- Quality report summaries.
-
 ## Matching Note
 
-The backend now has a matching service and `matching_candidates` persistence for review workflows, but no matching API endpoint is defined yet.
+The backend now has a matching service, `matching_candidates` persistence, `/match`, and `/unmatched` review read endpoints.
 
 ## Validation Note
 
-The backend now has validation/history services and persistence for `price_item_versions`, `anomaly_flags`, and `verification_actions`, but no admin review API endpoint is defined yet.
+The backend now has validation/history services and persistence for `price_item_versions`, `anomaly_flags`, and `verification_actions`, with basic verify/reject admin actions.
 
 ## Worker Note
 
