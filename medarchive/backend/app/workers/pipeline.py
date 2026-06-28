@@ -20,6 +20,7 @@ from app.services.normalization.row_normalization import (
     normalize_pdf_candidate,
     normalize_spreadsheet_candidate,
 )
+from app.services.admin.parsed_service_publish import publish_parsed_services
 from app.services.validation.price_history import PriceHistoryService
 from app.services.validation.rules import ValidationIssue
 
@@ -167,6 +168,7 @@ class WorkerPipelineService:
         recorded_price_items = 0
         normalization_warnings: list[str] = []
         row_samples: list[dict] = []
+        all_versions: list = []
 
         for i, row in enumerate(rows):
             normalization_warnings.extend(row.warnings)
@@ -179,6 +181,7 @@ class WorkerPipelineService:
             else:
                 unmatched += 1
             versions = history_service.validate_and_record(row, service_id=service_id, price_document_id=document.id)
+            all_versions.extend(versions)
             recorded_price_items += len(versions)
             if len(rows) > 0 and i % max(1, len(rows) // 4) == 0:
                 document.progress_percent = min(80, 60 + int((i / len(rows)) * 20))
@@ -212,6 +215,10 @@ class WorkerPipelineService:
                 payload={"warnings": parsed.warnings},
             )
 
+        document.parser_stage = "publishing"
+        self.db.flush()
+        publish_summary = publish_parsed_services(self.db, document, rows, all_versions)
+
         total_candidates = len(parsed.row_candidates) + len(parsed.pdf_row_candidates) + docx_table_row_count(parsed)
         return {
             "parser_name": parsed.parser_name,
@@ -238,6 +245,7 @@ class WorkerPipelineService:
             "normalization_warnings": normalization_warnings[:ROW_SAMPLE_LIMIT],
             "row_samples": row_samples,
             "extracted_text_preview": (parsed.extracted_text or "")[:TEXT_PREVIEW_LIMIT],
+            **publish_summary,
         }
 
     def fail_document(self, document: PriceDocument, exc: Exception) -> DocumentProcessingOutcome:
