@@ -1,88 +1,75 @@
 "use client";
 
-import {
-  Activity,
-  AlertTriangle,
-  CheckCircle2,
-  Clock3,
-  FileCheck2,
-  FileWarning,
-  Layers3,
-  ListChecks,
-  ShieldAlert,
-} from "lucide-react";
+import { useEffect, useState } from "react";
+import { FileCheck2, Layers3, ListChecks, ShieldAlert } from "lucide-react";
 
 import { AppShell } from "@/components/app-shell";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { NoDataYet, ProcessingInProgress, RetryError } from "@/components/ui/states";
 import { useI18n, type TranslationKey } from "@/i18n";
-import {
-  anomalySummaries,
-  dashboardMock,
-  qualityMock,
-  queueSummaries,
-  recentImportBatches,
-  type BadgeTone,
-  type DocumentStatus,
-  type ImportBatchStatus,
-} from "@/features/dashboard/mock-data";
+import { getDashboard, type DashboardResponse } from "@/lib/api";
 
-const kpis = [
-  {
-    labelKey: "dashboard.documents",
-    value: dashboardMock.documents_total.toLocaleString(),
-    detailKey: "common.processing",
-    detailValue: dashboardMock.documents_by_status.processing,
-    tone: "info" as const,
-    icon: FileCheck2,
-  },
-  {
-    labelKey: "dashboard.activePrices",
-    value: dashboardMock.active_price_items.toLocaleString(),
-    detailKey: "dashboard.inactiveVersions",
-    detailValue: qualityMock.price_history.inactive,
-    tone: "success" as const,
-    icon: Layers3,
-  },
-  {
-    labelKey: "dashboard.verification",
-    value: dashboardMock.open_verification_actions.toLocaleString(),
-    detailKey: "dashboard.openActions",
-    detailValue: null,
-    tone: "warning" as const,
-    icon: ListChecks,
-  },
-  {
-    labelKey: "dashboard.anomalies",
-    value: dashboardMock.unresolved_anomalies.toLocaleString(),
-    detailKey: "dashboard.unmatchedRows",
-    detailValue: dashboardMock.unmatched_candidates,
-    tone: "error" as const,
-    icon: ShieldAlert,
-  },
-];
-
-const matchingBars = [
-  { labelKey: "dashboard.autoAccepted", value: qualityMock.matching.auto_accepted, tone: "success" as const },
-  { labelKey: "dashboard.needsReview", value: qualityMock.matching.needs_review, tone: "warning" as const },
-  { labelKey: "common.unmatched", value: qualityMock.matching.unmatched, tone: "error" as const },
-];
+const emptyDashboard: DashboardResponse = {
+  import_batches: 0,
+  documents_total: 0,
+  documents_by_status: {},
+  open_verification_actions: 0,
+  unresolved_anomalies: 0,
+  unmatched_candidates: 0,
+  active_price_items: 0,
+  extracted_rows: 0,
+  normalized_rows: 0,
+  auto_matched: 0,
+  needs_review: 0,
+  normalization_rate_percent: 0,
+};
 
 export function DashboardPage() {
   const { t } = useI18n();
-  const matchingTotal = matchingBars.reduce((sum, item) => sum + item.value, 0);
+  const [data, setData] = useState<DashboardResponse>(emptyDashboard);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    let mounted = true;
+    setLoading(true);
+    setError(null);
+    getDashboard()
+      .then((response) => {
+        if (mounted) setData(response);
+      })
+      .catch((fetchError: unknown) => {
+        if (mounted) setError(fetchError instanceof Error ? fetchError.message : "Dashboard request failed");
+      })
+      .finally(() => {
+        if (mounted) setLoading(false);
+      });
+    return () => {
+      mounted = false;
+    };
+  }, []);
+
+  const kpis = [
+    { labelKey: "dashboard.documents", value: data.documents_total, detailKey: "common.processing", detailValue: data.documents_by_status.processing ?? 0, tone: "info" as const, icon: FileCheck2 },
+    { labelKey: "dashboard.activePrices", value: data.active_price_items, detailKey: "dashboard.inactiveVersions", detailValue: null, tone: "success" as const, icon: Layers3 },
+    { labelKey: "dashboard.verification", value: data.open_verification_actions, detailKey: "dashboard.openActions", detailValue: null, tone: "warning" as const, icon: ListChecks },
+    { labelKey: "dashboard.anomalies", value: data.unresolved_anomalies, detailKey: "dashboard.unmatchedRows", detailValue: data.unmatched_candidates, tone: "error" as const, icon: ShieldAlert },
+  ];
 
   return (
     <AppShell>
       <div className="space-y-5">
+        {loading ? <ProcessingInProgress title={t("states.processing.title")} description={t("states.processing.description")} /> : null}
+        {error ? <RetryError description={error} onRetry={() => window.location.reload()} /> : null}
+
         <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
           {kpis.map((kpi) => (
             <Card key={kpi.labelKey}>
               <CardContent className="flex items-start justify-between gap-4">
                 <div className="min-w-0">
                   <p className="text-xs font-medium uppercase text-muted-foreground">{t(kpi.labelKey as TranslationKey)}</p>
-                  <div className="mt-2 text-3xl font-semibold tracking-normal text-foreground">{kpi.value}</div>
+                  <div className="mt-2 text-3xl font-semibold tracking-normal text-foreground">{kpi.value.toLocaleString()}</div>
                   <Badge variant={kpi.tone} className="mt-3">
                     {kpi.detailValue === null ? t(kpi.detailKey as TranslationKey) : `${kpi.detailValue} ${t(kpi.detailKey as TranslationKey)}`}
                   </Badge>
@@ -95,97 +82,26 @@ export function DashboardPage() {
           ))}
         </section>
 
-        <section className="grid gap-4 lg:grid-cols-4">
-          {queueSummaries.map((item) => (
-            <Card key={item.label}>
-              <CardContent>
-                <div className="flex items-center justify-between gap-3">
-                  <div>
-                    <div className="text-2xl font-semibold text-foreground">{item.value}</div>
-                    <p className="mt-1 text-xs uppercase text-muted-foreground">{item.label}</p>
-                  </div>
-                  <Badge variant={documentTone(item.status)}>{statusLabel(item.status, t)}</Badge>
-                </div>
-                <p className="mt-3 text-xs leading-5">{item.helper}</p>
-              </CardContent>
-            </Card>
-          ))}
-        </section>
-
-        <section className="grid gap-5 xl:grid-cols-[minmax(0,1fr)_380px]">
+        <section className="grid gap-5 lg:grid-cols-[minmax(0,1fr)_360px]">
           <Card>
             <CardHeader>
               <div>
-                <CardTitle>{t("dashboard.recentBatches")}</CardTitle>
-                <CardDescription>{t("dashboard.recentBatchesDesc")}</CardDescription>
+                <CardTitle>{t("dashboard.parsingHealth")}</CardTitle>
+                <CardDescription>{t("dashboard.parsingDesc")}</CardDescription>
               </div>
-              <Badge variant="info">{dashboardMock.import_batches} {t("common.total")}</Badge>
-            </CardHeader>
-            <CardContent className="p-0">
-              <div className="table-shell rounded-none border-x-0 border-b-0">
-                <Table>
-                  <TableHeader>
-                    <TableRow>
-                      <TableHead>{t("common.batch")}</TableHead>
-                      <TableHead>{t("common.status")}</TableHead>
-                      <TableHead className="text-right">{t("common.progress")}</TableHead>
-                      <TableHead className="text-right">{t("common.failed")}</TableHead>
-                      <TableHead>{t("common.created")}</TableHead>
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {recentImportBatches.map((batch) => (
-                      <TableRow key={batch.id}>
-                        <TableCell>
-                          <div className="font-medium text-foreground">{batch.original_filename}</div>
-                          <div className="mt-1 text-xs text-muted-foreground">{batch.source_type}</div>
-                        </TableCell>
-                        <TableCell>
-                          <Badge variant={batchTone(batch.status)}>{statusLabel(batch.status, t)}</Badge>
-                        </TableCell>
-                        <TableCell className="text-right tabular-nums">
-                          {batch.processed_files}/{batch.total_files}
-                        </TableCell>
-                        <TableCell className="text-right tabular-nums">{batch.failed_files}</TableCell>
-                        <TableCell>{batch.created_at}</TableCell>
-                      </TableRow>
-                    ))}
-                  </TableBody>
-                </Table>
-              </div>
-            </CardContent>
-          </Card>
-
-          <Card>
-            <CardHeader>
-              <div>
-                <CardTitle>{t("dashboard.matchingDistribution")}</CardTitle>
-                <CardDescription>{t("dashboard.matchingDesc")}</CardDescription>
-              </div>
+              <Badge variant="info">{data.import_batches} {t("common.batch")}</Badge>
             </CardHeader>
             <CardContent className="space-y-4">
-              <div className="flex h-36 items-end gap-3 rounded-md border border-border bg-background/45 px-4 pb-4 pt-5">
-                {matchingBars.map((item) => (
-                  <div key={item.labelKey} className="flex min-w-0 flex-1 flex-col items-center gap-2">
-                    <div
-                      className={chartBarClass(item.tone)}
-                      style={{ height: `${Math.max(12, Math.round((item.value / matchingTotal) * 100))}%` }}
-                    />
-                    <span className="w-full truncate text-center text-xs text-muted-foreground">{t(item.labelKey as TranslationKey)}</span>
-                  </div>
-                ))}
-              </div>
-              {matchingBars.map((item) => (
-                <div key={item.labelKey} className="flex items-center justify-between gap-3">
-                  <span className="text-sm text-muted-foreground">{t(item.labelKey as TranslationKey)}</span>
-                  <Badge variant={item.tone}>{item.value}</Badge>
-                </div>
-              ))}
+              {Object.keys(data.documents_by_status).length > 0 ? (
+                Object.entries(data.documents_by_status).map(([status, count]) => (
+                  <StatusBar key={status} status={status} count={count} total={data.documents_total} />
+                ))
+              ) : (
+                <NoDataYet />
+              )}
             </CardContent>
           </Card>
-        </section>
 
-        <section className="grid gap-5 lg:grid-cols-[minmax(0,0.95fr)_minmax(0,1.05fr)]">
           <Card>
             <CardHeader>
               <div>
@@ -194,42 +110,9 @@ export function DashboardPage() {
               </div>
             </CardHeader>
             <CardContent className="space-y-3">
-              {anomalySummaries.map((item) => (
-                <div key={item.code} className="flex items-center justify-between gap-4 rounded-md border border-border bg-background/45 p-3">
-                  <div className="flex min-w-0 items-center gap-3">
-                    <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md bg-secondary text-muted-foreground">
-                      <AlertTriangle className="h-4 w-4" aria-hidden="true" />
-                    </div>
-                    <div className="min-w-0">
-                      <div className="truncate text-sm font-medium text-foreground">{item.label}</div>
-                      <div className="mt-1 truncate text-xs text-muted-foreground">{item.code}</div>
-                    </div>
-                  </div>
-                  <div className="flex shrink-0 items-center gap-2">
-                    <Badge variant={severityTone(item.severity)}>{severityLabel(item.severity, t)}</Badge>
-                    <span className="w-6 text-right text-sm font-semibold tabular-nums text-foreground">{item.count}</span>
-                  </div>
-                </div>
-              ))}
-            </CardContent>
-          </Card>
-
-          <Card>
-            <CardHeader>
-              <div>
-                <CardTitle>{t("dashboard.parsingHealth")}</CardTitle>
-                <CardDescription>{t("dashboard.parsingDesc")}</CardDescription>
-              </div>
-            </CardHeader>
-            <CardContent className="space-y-4">
-              {Object.entries(dashboardMock.documents_by_status).map(([status, count]) => (
-                <StatusBar key={status} status={status as DocumentStatus} count={count} total={dashboardMock.documents_total} />
-              ))}
-              <div className="grid gap-3 sm:grid-cols-3">
-                <MiniHealth icon={CheckCircle2} label={t("dashboard.accepted")} value={`${qualityMock.matching.auto_accepted}`} tone="success" />
-                <MiniHealth icon={Clock3} label={t("common.review")} value={`${qualityMock.matching.needs_review}`} tone="warning" />
-                <MiniHealth icon={FileWarning} label={t("common.unmatched")} value={`${qualityMock.matching.unmatched}`} tone="error" />
-              </div>
+              <MetricRow label={t("dashboard.unmatchedRows")} value={data.unmatched_candidates} tone="warning" />
+              <MetricRow label={t("dashboard.openActions")} value={data.open_verification_actions} tone="info" />
+              <MetricRow label={t("dashboard.anomalies")} value={data.unresolved_anomalies} tone="error" />
             </CardContent>
           </Card>
         </section>
@@ -238,97 +121,33 @@ export function DashboardPage() {
   );
 }
 
-function StatusBar({ status, count, total }: { status: DocumentStatus; count: number; total: number }) {
-  const { t } = useI18n();
-  const percent = Math.round((count / total) * 100);
+function StatusBar({ status, count, total }: { status: string; count: number; total: number }) {
+  const percent = total > 0 ? Math.round((count / total) * 100) : 0;
   return (
     <div>
       <div className="mb-2 flex items-center justify-between gap-3">
-        <div className="flex items-center gap-2">
-          <Badge variant={documentTone(status)}>{statusLabel(status, t)}</Badge>
-          <span className="text-sm text-muted-foreground">{count} {t("common.services")}</span>
-        </div>
-        <span className="text-sm font-medium tabular-nums text-foreground">{percent}%</span>
+        <Badge variant={statusTone(status)}>{status}</Badge>
+        <span className="text-sm font-medium tabular-nums text-foreground">{count} / {percent}%</span>
       </div>
       <div className="h-2 rounded-full bg-secondary">
-        <div className={chartBarClass(documentTone(status))} style={{ width: `${percent}%` }} />
+        <div className="h-full rounded-full bg-primary" style={{ width: `${percent}%` }} />
       </div>
     </div>
   );
 }
 
-function MiniHealth({
-  icon: Icon,
-  label,
-  value,
-  tone,
-}: {
-  icon: typeof Activity;
-  label: string;
-  value: string;
-  tone: Exclude<BadgeTone, "neutral">;
-}) {
+function MetricRow({ label, value, tone }: { label: string; value: number; tone: "warning" | "info" | "error" }) {
   return (
-    <div className="rounded-md border border-border bg-background/45 p-3">
-      <Icon className={`h-4 w-4 ${textToneClass(tone)}`} aria-hidden="true" />
-      <div className="mt-3 text-lg font-semibold text-foreground">{value}</div>
-      <p className="mt-1 text-xs text-muted-foreground">{label}</p>
+    <div className="flex items-center justify-between gap-3 rounded-md border border-border bg-background/45 p-3">
+      <span className="text-sm text-muted-foreground">{label}</span>
+      <Badge variant={tone}>{value}</Badge>
     </div>
   );
 }
 
-function statusLabel(status: DocumentStatus | ImportBatchStatus, t: ReturnType<typeof useI18n>["t"]) {
-  const labels: Record<DocumentStatus | ImportBatchStatus, TranslationKey> = {
-    pending: "common.pending",
-    processing: "common.processing",
-    parsed: "common.parsed",
-    failed: "common.failed",
-    completed: "common.completed",
-  };
-  return t(labels[status]);
-}
-
-function documentTone(status: DocumentStatus): BadgeTone {
-  if (status === "parsed") return "success";
+function statusTone(status: string) {
+  if (status === "parsed" || status === "completed") return "success";
   if (status === "processing") return "info";
   if (status === "failed") return "error";
   return "warning";
-}
-
-function batchTone(status: ImportBatchStatus): BadgeTone {
-  if (status === "completed") return "success";
-  if (status === "processing") return "info";
-  if (status === "failed") return "error";
-  return "warning";
-}
-
-function severityTone(severity: "high" | "medium" | "low"): BadgeTone {
-  if (severity === "high") return "error";
-  if (severity === "medium") return "warning";
-  return "info";
-}
-
-function severityLabel(severity: "high" | "medium" | "low", t: ReturnType<typeof useI18n>["t"]) {
-  const labels: Record<typeof severity, TranslationKey> = {
-    high: "common.high",
-    medium: "common.medium",
-    low: "common.low",
-  };
-  return t(labels[severity]);
-}
-
-function chartBarClass(tone: BadgeTone) {
-  const base = "h-full w-full rounded-full transition-colors";
-  if (tone === "success") return `${base} bg-success`;
-  if (tone === "warning") return `${base} bg-warning`;
-  if (tone === "error") return `${base} bg-destructive`;
-  if (tone === "info") return `${base} bg-info`;
-  return `${base} bg-muted`;
-}
-
-function textToneClass(tone: Exclude<BadgeTone, "neutral">) {
-  if (tone === "success") return "text-success";
-  if (tone === "warning") return "text-warning";
-  if (tone === "error") return "text-destructive";
-  return "text-info";
 }

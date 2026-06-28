@@ -7,15 +7,16 @@ from pathlib import Path
 import zipfile
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile, status
+from fastapi import APIRouter, BackgroundTasks, Depends, File, HTTPException, Query, UploadFile, status
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
-from sqlalchemy import func, select
+from sqlalchemy import delete, func, select
 from sqlalchemy.orm import Session, selectinload
 
 from app.core.auth import create_admin_token, require_admin, verify_admin_credentials
-from app.core.constants import MatchDecisionStatus, PriceDocumentStatus, PriceItemVersionStatus, VerificationActionStatus
 from app.core.config import get_settings
+from app.core.constants import MatchDecisionStatus, PriceDocumentStatus, PriceItemVersionStatus, VerificationActionStatus
+from app.core.logging import get_logger
 from app.db.models import (
     AnomalyFlag,
     FileAsset,
@@ -27,17 +28,19 @@ from app.db.models import (
     Service,
     VerificationAction,
 )
-from app.db.session import get_db
+from app.db.session import SessionLocal, get_db
 from app.services.admin.archive_import import import_archive_bytes
 from app.services.admin.service_directory_import import import_service_directory
 from app.services.matching.engine import LayeredMatchingEngine
 from app.services.normalization.row_normalization import PriceItemAmountPayload, PriceItemPayload
+from app.services.validation.price_history import PriceHistoryService
 from app.workers.pipeline import WorkerPipelineService
 from app.workers.tasks import process_batch_task, process_document_task
 
 router = APIRouter(tags=["admin"], dependencies=[Depends(require_admin)])
 login_router = APIRouter(tags=["admin"])
 MAX_PAGE_SIZE = 100
+logger = get_logger(__name__)
 
 
 class AdminLoginRequest(BaseModel):
@@ -56,6 +59,7 @@ class ArchiveImportResponse(BaseModel):
     original_asset_id: UUID
     extracted_files: int
     price_documents: int
+    processing_task_id: str | None = None
     warnings: list[str]
 
 
@@ -219,6 +223,27 @@ class PriceItemReviewResponse(BaseModel):
     action: str
 
 
+class ManualMatchRequest(BaseModel):
+    service_id: UUID
+
+
+class ManualMatchResponse(BaseModel):
+    candidate_id: UUID
+    service_id: UUID
+    created_price_items: int
+    status: str
+
+
+class VerificationResolveRequest(BaseModel):
+    notes: str | None = None
+
+
+class VerificationResolveResponse(BaseModel):
+    action_id: UUID
+    status: str
+    resolved_anomaly: bool
+
+
 class DashboardResponse(BaseModel):
     import_batches: int
     documents_total: int
@@ -227,6 +252,11 @@ class DashboardResponse(BaseModel):
     unresolved_anomalies: int
     unmatched_candidates: int
     active_price_items: int
+    extracted_rows: int = 0
+    normalized_rows: int = 0
+    auto_matched: int = 0
+    needs_review: int = 0
+    normalization_rate_percent: float = 0.0
 
 
 class QualityReportResponse(BaseModel):
@@ -235,6 +265,10 @@ class QualityReportResponse(BaseModel):
     matching: dict
     validation: dict
     price_history: dict
+    documents: dict = Field(default_factory=dict)
+    extraction: dict = Field(default_factory=dict)
+    normalization: dict = Field(default_factory=dict)
+    top_parser_errors: list[dict] = Field(default_factory=list)
 
 
 @login_router.post("/admin/login", response_model=AdminLoginResponse)
@@ -250,7 +284,11 @@ def admin_login(request: AdminLoginRequest) -> AdminLoginResponse:
 
 
 @router.post("/admin/import/archive", response_model=ArchiveImportResponse, status_code=status.HTTP_201_CREATED)
-async def import_archive(file: UploadFile = File(...), db: Session = Depends(get_db)) -> ArchiveImportResponse:
+async def import_archive(
+    background_tasks: BackgroundTasks,
+    file: UploadFile = File(...),
+    db: Session = Depends(get_db),
+) -> ArchiveImportResponse:
     filename = file.filename or "archive.zip"
     if not filename.casefold().endswith(".zip"):
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Only ZIP uploads are supported")
@@ -266,11 +304,22 @@ async def import_archive(file: UploadFile = File(...), db: Session = Depends(get
     except zipfile.BadZipFile as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid ZIP archive") from exc
 
+    processing_task_id: str | None = None
+    if result.price_documents:
+        try:
+            processing_task = process_batch_task.delay(str(result.import_batch_id))
+            processing_task_id = processing_task.id
+        except Exception:
+            logger.exception("Celery enqueue failed; processing import batch in API background task.")
+            background_tasks.add_task(process_import_batch_locally, result.import_batch_id)
+            processing_task_id = f"background:{result.import_batch_id}"
+
     return ArchiveImportResponse(
         import_batch_id=result.import_batch_id,
         original_asset_id=result.original_asset_id,
         extracted_files=result.extracted_files,
         price_documents=result.price_documents,
+        processing_task_id=processing_task_id,
         warnings=result.warnings,
     )
 
@@ -466,6 +515,37 @@ def match_row(request: MatchRequest, db: Session = Depends(get_db)) -> MatchResp
     )
 
 
+@router.post("/admin/unmatched/{candidate_id}/match", response_model=ManualMatchResponse)
+def manually_match_candidate(
+    candidate_id: UUID,
+    request: ManualMatchRequest,
+    db: Session = Depends(get_db),
+) -> ManualMatchResponse:
+    candidate = db.get(MatchingCandidate, candidate_id)
+    if candidate is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Matching candidate not found")
+    service = db.get(Service, request.service_id)
+    if service is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Service not found")
+    if not candidate.row_payload:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Matching candidate has no row payload")
+
+    row = PriceItemPayload.model_validate(candidate.row_payload)
+    versions = PriceHistoryService(db).validate_and_record(
+        row,
+        service_id=service.id,
+        price_document_id=candidate.price_document_id,
+    )
+    db.execute(delete(MatchingCandidate).where(MatchingCandidate.row_hash == candidate.row_hash))
+    db.commit()
+    return ManualMatchResponse(
+        candidate_id=candidate_id,
+        service_id=service.id,
+        created_price_items=len(versions),
+        status=VerificationActionStatus.COMPLETED.value,
+    )
+
+
 @router.post("/admin/price-items/{price_item_id}/verify", response_model=PriceItemReviewResponse)
 def verify_price_item(price_item_id: UUID, db: Session = Depends(get_db)) -> PriceItemReviewResponse:
     item = db.get(PriceItemVersion, price_item_id)
@@ -491,8 +571,32 @@ def reject_price_item(price_item_id: UUID, db: Session = Depends(get_db)) -> Pri
     return PriceItemReviewResponse(id=item.id, status=item.status, is_active=item.is_active, action="rejected")
 
 
+@router.post("/admin/verification/{action_id}/resolve", response_model=VerificationResolveResponse)
+def resolve_verification_action(
+    action_id: UUID,
+    request: VerificationResolveRequest,
+    db: Session = Depends(get_db),
+) -> VerificationResolveResponse:
+    action = db.get(VerificationAction, action_id)
+    if action is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Verification action not found")
+    action.status = VerificationActionStatus.COMPLETED.value
+    action.notes = request.notes
+    resolved_anomaly = False
+    if action.anomaly_flag is not None:
+        action.anomaly_flag.resolved = True
+        resolved_anomaly = True
+    db.commit()
+    return VerificationResolveResponse(
+        action_id=action.id,
+        status=action.status,
+        resolved_anomaly=resolved_anomaly,
+    )
+
+
 @router.get("/admin/dashboard", response_model=DashboardResponse)
 def dashboard(db: Session = Depends(get_db)) -> DashboardResponse:
+    metrics = collect_processing_metrics(db)
     return DashboardResponse(
         import_batches=int(db.scalar(select(func.count(ImportBatch.id))) or 0),
         documents_total=int(db.scalar(select(func.count(PriceDocument.id))) or 0),
@@ -501,20 +605,44 @@ def dashboard(db: Session = Depends(get_db)) -> DashboardResponse:
         unresolved_anomalies=int(db.scalar(select(func.count(AnomalyFlag.id)).where(AnomalyFlag.resolved.is_(False))) or 0),
         unmatched_candidates=int(db.scalar(select(func.count(MatchingCandidate.id)).where(MatchingCandidate.decision_status == MatchDecisionStatus.UNMATCHED.value)) or 0),
         active_price_items=int(db.scalar(select(func.count(PriceItemVersion.id)).where(PriceItemVersion.is_active.is_(True))) or 0),
+        extracted_rows=metrics["extracted_rows"],
+        normalized_rows=metrics["normalized_rows"],
+        auto_matched=metrics["auto_matched"],
+        needs_review=metrics["needs_review"],
+        normalization_rate_percent=metrics["normalization_rate_percent"],
     )
 
 
 @router.get("/admin/reports/quality", response_model=QualityReportResponse)
 def quality_report(db: Session = Depends(get_db)) -> QualityReportResponse:
+    metrics = collect_processing_metrics(db)
+    documents_by_status = dict(db.execute(select(PriceDocument.status, func.count(PriceDocument.id)).group_by(PriceDocument.status)).all())
     return QualityReportResponse(
         generated_at=datetime.now(UTC),
-        parsing=dict(db.execute(select(PriceDocument.status, func.count(PriceDocument.id)).group_by(PriceDocument.status)).all()),
+        parsing=documents_by_status,
         matching=dict(db.execute(select(MatchingCandidate.decision_status, func.count(MatchingCandidate.id)).group_by(MatchingCandidate.decision_status)).all()),
         validation=dict(db.execute(select(AnomalyFlag.code, func.count(AnomalyFlag.id)).group_by(AnomalyFlag.code)).all()),
         price_history={
             "active": int(db.scalar(select(func.count(PriceItemVersion.id)).where(PriceItemVersion.is_active.is_(True))) or 0),
             "inactive": int(db.scalar(select(func.count(PriceItemVersion.id)).where(PriceItemVersion.is_active.is_(False))) or 0),
         },
+        documents={
+            "total": int(db.scalar(select(func.count(PriceDocument.id))) or 0),
+            "by_status": documents_by_status,
+        },
+        extraction={
+            "candidate_rows": metrics["extracted_rows"],
+            "documents_without_rows": metrics["documents_without_rows"],
+        },
+        normalization={
+            "normalized_rows": metrics["normalized_rows"],
+            "recorded_price_items": metrics["recorded_price_items"],
+            "auto_matched": metrics["auto_matched"],
+            "needs_review": metrics["needs_review"],
+            "unmatched": metrics["unmatched"],
+            "normalization_rate_percent": metrics["normalization_rate_percent"],
+        },
+        top_parser_errors=metrics["top_parser_errors"],
     )
 
 
@@ -598,3 +726,55 @@ def event_summary(event: ProcessingEvent) -> ProcessingEventSummary:
 
 def safe_upload_filename(filename: str) -> str:
     return Path(filename).name.strip() or "upload.bin"
+
+
+def collect_processing_metrics(db: Session) -> dict:
+    documents = db.scalars(select(PriceDocument)).all()
+    extracted_rows = 0
+    normalized_rows = 0
+    recorded_price_items = 0
+    auto_matched = 0
+    needs_review = 0
+    unmatched = 0
+    documents_without_rows = 0
+    errors: dict[str, int] = {}
+    for document in documents:
+        summary = document.parsed_summary or {}
+        extracted = int(summary.get("candidate_rows") or summary.get("row_candidates") or 0)
+        normalized = int(summary.get("normalized_rows") or 0)
+        extracted_rows += extracted
+        normalized_rows += normalized
+        recorded_price_items += int(summary.get("recorded_price_items") or 0)
+        auto_matched += int(summary.get("auto_matched") or 0)
+        needs_review += int(summary.get("needs_review") or 0)
+        unmatched += int(summary.get("unmatched") or 0)
+        if document.status in {PriceDocumentStatus.PARSED.value, PriceDocumentStatus.NEEDS_REVIEW.value} and normalized == 0:
+            documents_without_rows += 1
+        if document.last_error:
+            errors[document.last_error] = errors.get(document.last_error, 0) + 1
+        for warning in summary.get("parser_warnings") or []:
+            errors[str(warning)] = errors.get(str(warning), 0) + 1
+    rate = round((normalized_rows / extracted_rows) * 100, 2) if extracted_rows else 0.0
+    return {
+        "extracted_rows": extracted_rows,
+        "normalized_rows": normalized_rows,
+        "recorded_price_items": recorded_price_items,
+        "auto_matched": auto_matched,
+        "needs_review": needs_review,
+        "unmatched": unmatched,
+        "documents_without_rows": documents_without_rows,
+        "normalization_rate_percent": rate,
+        "top_parser_errors": [
+            {"message": message, "count": count}
+            for message, count in sorted(errors.items(), key=lambda item: item[1], reverse=True)[:5]
+        ],
+    }
+
+
+def process_import_batch_locally(import_batch_id: UUID) -> None:
+    with SessionLocal() as db:
+        service = WorkerPipelineService(db)
+        service.process_batch(
+            import_batch_id,
+            enqueue_document=lambda price_document_id: service.process_document(UUID(price_document_id)),
+        )

@@ -1,0 +1,66 @@
+{
+  "common": {
+    "brand": "MedPrice",
+    "search": "Search",
+    "admin": "Admin",
+    "service": "Service",
+    "clinic": "Clinic",
+    "city": "City"
+  },
+  "navigation": {
+    "home": "Home",
+    "search": "Search",
+    "services": "Services",
+    "clinics": "Clinics"
+  },
+  "search": {
+    "title": "Medical service search",
+    "description": "Compare medical service prices across clinics in Kazakhstan.",
+    "placeholder": "Service, clinic, city, or code"
+  },
+  "services": {
+    "completeBloodCount": "Service page"
+  },
+  "clinics": {
+    "clinic07": "Clinic page"
+  },
+  "cities": {
+    "kazakhstan": "Kazakhstan",
+    "astana": "Astana",
+    "almaty": "Almaty"
+  },
+  "share": {
+    "copy": "Share",
+    "copied": "Link copied"
+  },
+  "seo": {
+    "siteTitle": "MedPrice — compare medical service prices in Kazakhstan",
+    "siteDescription": "Compare prices for lab tests, diagnostics, and doctor appointments in clinics across Kazakhstan. Search by services, cities, clinics, and data sources.",
+    "home": {
+      "title": "MedPrice — compare medical service prices in Kazakhstan",
+      "description": "Search medical services, clinics, and current prices in the MedPrice catalog."
+    },
+    "search": {
+      "title": "Medical service search in {city} | MedPrice",
+      "titleWithQuery": "{query} in {city} — clinic prices | MedPrice",
+      "description": "Compare medical service prices in clinics across {city}. Search by services, cities, clinics, and data sources.",
+      "descriptionWithQuery": "Compare {query} prices in clinics across {city}. Sources, prices, clinics, and data freshness."
+    },
+    "service": {
+      "title": "{service} in {city} — clinic prices | MedPrice",
+      "description": "Compare current clinic prices for {service} in {city}."
+    },
+    "clinic": {
+      "title": "{clinic} — clinic prices and services | MedPrice",
+      "description": "Current services, prices, and document history for {clinic}."
+    },
+    "login": {
+      "title": "Admin sign in | MedPrice",
+      "description": "Sign in to the MedPrice admin panel."
+    },
+    "admin": {
+      "title": "{page} | MedPrice",
+      "description": "Internal MedPrice page."
+    }
+  }
+}

@@ -7,11 +7,10 @@ export const dynamic = "force-static";
 export default function sitemap(): MetadataRoute.Sitemap {
   const now = new Date();
   const localized = supportedSeoLocales.flatMap((locale) => [
+    `/${locale}`,
     `/${locale}/search`,
-    `/${locale}/services/complete-blood-count`,
-    `/${locale}/clinics/clinic-07`,
   ]);
-  return ["/", "/services/complete-blood-count", "/partners/clinic-07", ...localized].map((path) => ({
+  return ["/", ...localized].map((path) => ({
     url: absoluteUrl(path),
     lastModified: now,
     changeFrequency: "weekly",

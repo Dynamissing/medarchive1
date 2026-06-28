@@ -1,58 +1,144 @@
 "use client";
 
-import { useMemo, useState } from "react";
-import { Eye, MoreHorizontal, RefreshCcw, RotateCw } from "lucide-react";
+import { useCallback, useEffect, useState } from "react";
+import { Eye, RefreshCcw } from "lucide-react";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { NoResults, TableSkeleton } from "@/components/ui/states";
+import { NoResults, ProcessingInProgress, RetryError } from "@/components/ui/states";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { useI18n, type TranslationKey } from "@/i18n";
-import { documentsMock, type DocumentFormat, type DocumentStatus } from "@/features/documents/mock-data";
+import {
+  getDocument,
+  getDocuments,
+  previewFile,
+  reprocessDocument,
+  type PriceDocumentDetail,
+  type PriceDocumentSummary,
+} from "@/lib/api";
 
-type StatusFilter = "all" | DocumentStatus;
-type FormatFilter = "all" | DocumentFormat;
+type StatusFilter = "all" | "pending" | "processing" | "parsed" | "needs_review" | "failed";
 
 const statusOptions: Array<{ value: StatusFilter; labelKey: TranslationKey }> = [
   { value: "all", labelKey: "documents.allStatuses" },
   { value: "pending", labelKey: "common.pending" },
   { value: "processing", labelKey: "common.processing" },
   { value: "parsed", labelKey: "common.parsed" },
+  { value: "needs_review", labelKey: "documents.attention" },
   { value: "failed", labelKey: "common.failed" },
-];
-
-const formatOptions: Array<{ value: FormatFilter; labelKey?: TranslationKey; label?: string }> = [
-  { value: "all", labelKey: "documents.allFormats" },
-  { value: "xlsx", label: "XLSX" },
-  { value: "xls", label: "XLS" },
-  { value: "docx", label: "DOCX" },
-  { value: "pdf_text", label: "PDF text" },
-  { value: "pdf_ocr_candidate", label: "PDF OCR" },
 ];
 
 export function DocumentsPage() {
   const { t } = useI18n();
   const [status, setStatus] = useState<StatusFilter>("all");
-  const [format, setFormat] = useState<FormatFilter>("all");
-  const [loadingPreview, setLoadingPreview] = useState(false);
+  const [rows, setRows] = useState<PriceDocumentSummary[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [reprocessingIds, setReprocessingIds] = useState<Set<string>>(new Set());
+  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [detail, setDetail] = useState<PriceDocumentDetail | null>(null);
+  const [detailLoading, setDetailLoading] = useState(false);
 
-  const rows = useMemo(() => {
-    return documentsMock.filter((document) => {
-      const statusMatches = status === "all" || document.status === status;
-      const formatMatches = format === "all" || document.format === format;
-      return statusMatches && formatMatches;
-    });
-  }, [status, format]);
+  const refreshDocuments = useCallback(
+    ({ showLoading, shouldUpdate = () => true }: { showLoading: boolean; shouldUpdate?: () => boolean }) => {
+      if (showLoading) setLoading(true);
+      setError(null);
+      return getDocuments({ status })
+        .then((response) => {
+          if (shouldUpdate()) {
+            setRows(response.items);
+            setSelectedId((current) => current ?? response.items[0]?.id ?? null);
+          }
+        })
+        .catch((fetchError: unknown) => {
+          if (shouldUpdate()) {
+            setRows([]);
+            setError(fetchError instanceof Error ? fetchError.message : "Documents request failed");
+          }
+        });
+    },
+    [status],
+  );
+
+  useEffect(() => {
+    let active = true;
+    refreshDocuments({ showLoading: true, shouldUpdate: () => active })
+      .finally(() => {
+        if (active) setLoading(false);
+      });
+    return () => {
+      active = false;
+    };
+  }, [refreshDocuments]);
+
+  useEffect(() => {
+    if (!rows.some((document) => document.status === "pending" || document.status === "processing")) return;
+    const interval = window.setInterval(() => {
+      refreshDocuments({ showLoading: false });
+    }, 3000);
+    return () => window.clearInterval(interval);
+  }, [refreshDocuments, rows]);
+
+  useEffect(() => {
+    if (!selectedId) {
+      setDetail(null);
+      return;
+    }
+    let active = true;
+    setDetailLoading(true);
+    getDocument(selectedId)
+      .then((document) => {
+        if (active) setDetail(document);
+      })
+      .catch((fetchError: unknown) => {
+        if (active) setError(fetchError instanceof Error ? fetchError.message : "Document detail request failed");
+      })
+      .finally(() => {
+        if (active) setDetailLoading(false);
+      });
+    return () => {
+      active = false;
+    };
+  }, [selectedId]);
+
+  async function handleReprocess(documentId: string) {
+    setReprocessingIds((current) => new Set(current).add(documentId));
+    setError(null);
+    try {
+      await reprocessDocument(documentId);
+      await refreshDocuments({ showLoading: false });
+      if (selectedId === documentId) {
+        setDetail(await getDocument(documentId));
+      }
+    } catch (reprocessError: unknown) {
+      setError(reprocessError instanceof Error ? reprocessError.message : "Reprocess request failed");
+    } finally {
+      setReprocessingIds((current) => {
+        const next = new Set(current);
+        next.delete(documentId);
+        return next;
+      });
+    }
+  }
+
+  async function handlePreview(document: PriceDocumentSummary) {
+    if (!document.file_asset_id) return;
+    setError(null);
+    try {
+      const blob = await previewFile(document.file_asset_id);
+      const url = window.URL.createObjectURL(blob);
+      window.open(url, "_blank", "noopener,noreferrer");
+      window.setTimeout(() => window.URL.revokeObjectURL(url), 60_000);
+    } catch (previewError: unknown) {
+      setError(previewError instanceof Error ? previewError.message : "File preview failed");
+    }
+  }
 
   return (
-    <div className="space-y-5">
-      <section className="grid gap-4 md:grid-cols-4">
-        <SummaryCard label={t("documents.total")} value={documentsMock.length} tone="info" />
-        <SummaryCard label={t("common.parsed")} value={documentsMock.filter((item) => item.status === "parsed").length} tone="success" />
-        <SummaryCard label={t("common.processing")} value={documentsMock.filter((item) => item.status === "processing").length} tone="info" />
-        <SummaryCard label={t("documents.attention")} value={documentsMock.filter((item) => item.status === "failed").length} tone="error" />
-      </section>
+    <div className="grid gap-5 xl:grid-cols-[minmax(0,1fr)_430px]">
+      {loading ? <ProcessingInProgress /> : null}
+      {error ? <RetryError description={error} onRetry={() => setStatus((value) => value)} /> : null}
 
       <Card>
         <CardHeader>
@@ -63,52 +149,83 @@ export function DocumentsPage() {
           <Badge variant="neutral">{rows.length} {t("common.visible")}</Badge>
         </CardHeader>
         <CardContent className="space-y-4">
-          <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
-            <div className="flex flex-col gap-3 sm:flex-row">
-              <FilterSelect label={t("common.status")} value={status} onChange={(value) => setStatus(value as StatusFilter)} options={statusOptions} />
-              <FilterSelect label={t("common.format")} value={format} onChange={(value) => setFormat(value as FormatFilter)} options={formatOptions} />
-            </div>
-            <div className="flex flex-wrap gap-2">
-              <Button className="flex-1 sm:flex-none" type="button" variant="secondary" onClick={() => setLoadingPreview((value) => !value)}>
-                <RotateCw className="h-4 w-4" aria-hidden="true" />
-                {loadingPreview ? t("documents.showRows") : t("documents.previewLoading")}
-              </Button>
-              <Button
-                className="flex-1 sm:flex-none"
-                type="button"
-                variant="ghost"
-                onClick={() => {
-                  setStatus("all");
-                  setFormat("all");
-                  setLoadingPreview(false);
-                }}
-              >
-                {t("common.reset")}
-              </Button>
-            </div>
-          </div>
+          <label className="flex max-w-56 flex-col gap-2">
+            <span className="text-xs font-medium uppercase text-muted-foreground">{t("common.status")}</span>
+            <select
+              className="h-9 rounded-md border border-input bg-background/65 px-3 text-sm text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+              value={status}
+              onChange={(event) => setStatus(event.target.value as StatusFilter)}
+            >
+              {statusOptions.map((option) => (
+                <option key={option.value} value={option.value}>{t(option.labelKey)}</option>
+              ))}
+            </select>
+          </label>
 
           <div className="table-shell">
             <Table>
               <TableHeader>
                 <TableRow>
                   <TableHead>{t("common.file")}</TableHead>
-                  <TableHead>{t("common.partner")}</TableHead>
-                  <TableHead>{t("common.date")}</TableHead>
                   <TableHead>{t("common.format")}</TableHead>
                   <TableHead>{t("common.status")}</TableHead>
-                  <TableHead>{t("documents.parsedAt")}</TableHead>
+                  <TableHead className="text-right">{t("common.progress")}</TableHead>
+                  <TableHead>{t("common.error")}</TableHead>
                   <TableHead className="text-right">{t("common.actions")}</TableHead>
                 </TableRow>
               </TableHeader>
-              {loadingPreview ? (
-                <TableSkeleton rows={5} columns={7} />
-              ) : rows.length > 0 ? (
-                <DocumentsRows rows={rows} />
+              {rows.length > 0 ? (
+                <TableBody>
+                  {rows.map((document) => (
+                    <TableRow
+                      key={document.id}
+                      className={document.id === selectedId ? "bg-secondary/45" : undefined}
+                      onClick={() => setSelectedId(document.id)}
+                    >
+                      <TableCell>
+                        <div className="font-medium text-foreground">{document.file?.original_filename ?? document.id}</div>
+                        <div className="mt-1 text-xs text-muted-foreground">{document.id}</div>
+                      </TableCell>
+                      <TableCell><Badge variant="neutral">{document.detected_type ?? document.file?.extension ?? t("common.notDetected")}</Badge></TableCell>
+                      <TableCell><Badge variant={statusTone(document.status)}>{statusLabel(document.status, t)}</Badge></TableCell>
+                      <TableCell className="text-right tabular-nums">{document.progress_percent}%</TableCell>
+                      <TableCell>{document.last_error ?? document.warnings[0] ?? ""}</TableCell>
+                      <TableCell>
+                        <div className="flex justify-end gap-1">
+                          <Button
+                            type="button"
+                            variant="ghost"
+                            size="icon"
+                            aria-label={t("documents.previewAction")}
+                            onClick={(event) => {
+                              event.stopPropagation();
+                              handlePreview(document);
+                            }}
+                          >
+                            <Eye className="h-4 w-4" aria-hidden="true" />
+                          </Button>
+                          <Button
+                            type="button"
+                            variant="ghost"
+                            size="icon"
+                            disabled={reprocessingIds.has(document.id)}
+                            aria-label={t("documents.reprocessAction")}
+                            onClick={(event) => {
+                              event.stopPropagation();
+                              handleReprocess(document.id);
+                            }}
+                          >
+                            <RefreshCcw className={reprocessingIds.has(document.id) ? "h-4 w-4 animate-spin" : "h-4 w-4"} aria-hidden="true" />
+                          </Button>
+                        </div>
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
               ) : (
                 <TableBody>
                   <TableRow>
-                    <TableCell colSpan={7}>
+                    <TableCell colSpan={6}>
                       <NoResults title={t("documents.noMatch.title")} description={t("documents.noMatch.description")} />
                     </TableCell>
                   </TableRow>
@@ -118,116 +235,78 @@ export function DocumentsPage() {
           </div>
         </CardContent>
       </Card>
+
+      <Card className="xl:sticky xl:top-20 xl:self-start">
+        <CardHeader>
+          <div>
+            <CardTitle>{t("common.details")}</CardTitle>
+            <CardDescription>{detail?.file?.original_filename ?? detail?.id ?? t("common.document")}</CardDescription>
+          </div>
+          {detail ? <Badge variant={statusTone(detail.status)}>{statusLabel(detail.status, t)}</Badge> : null}
+        </CardHeader>
+        <CardContent className="space-y-4">
+          {detailLoading ? <ProcessingInProgress /> : null}
+          {detail ? (
+            <>
+              <MetricGrid summary={detail.parsed_summary} />
+              <DetailBlock title="Parser summary" value={detail.parsed_summary} />
+              <DetailBlock title="Row samples" value={detail.parsed_summary.row_samples ?? []} />
+              <DetailBlock title="Events" value={detail.events.slice(0, 8)} />
+            </>
+          ) : (
+            <NoResults title={t("documents.noMatch.title")} description={t("documents.noMatch.description")} />
+          )}
+        </CardContent>
+      </Card>
     </div>
   );
 }
 
-function DocumentsRows({ rows }: { rows: typeof documentsMock }) {
-  const { t } = useI18n();
+function MetricGrid({ summary }: { summary: Record<string, unknown> }) {
+  const metrics: Array<[string, unknown]> = [
+    ["Rows", summary.normalized_rows],
+    ["Items", summary.recorded_price_items],
+    ["Auto", summary.auto_matched],
+    ["Review", summary.needs_review],
+    ["Unmatched", summary.unmatched],
+  ];
   return (
-    <TableBody>
-      {rows.map((document) => (
-        <TableRow key={document.id}>
-          <TableCell>
-            <div className="font-medium text-foreground">{document.file}</div>
-            <div className="mt-1 text-xs text-muted-foreground">{document.id}</div>
-          </TableCell>
-          <TableCell>{document.partner ?? t("common.unknown")}</TableCell>
-          <TableCell>{document.date ?? t("common.notDetected")}</TableCell>
-          <TableCell>
-            <Badge variant="neutral">{formatLabel(document.format)}</Badge>
-          </TableCell>
-          <TableCell>
-            <Badge variant={statusTone(document.status)}>{statusLabel(document.status, t)}</Badge>
-          </TableCell>
-          <TableCell>{document.parsed_at ?? t("common.pending")}</TableCell>
-          <TableCell>
-            <div className="flex justify-end gap-1">
-              <Button type="button" variant="ghost" size="icon" aria-label={`${t("documents.previewAction")} ${document.file}`}>
-                <Eye className="h-4 w-4" aria-hidden="true" />
-              </Button>
-              <Button type="button" variant="ghost" size="icon" aria-label={`${t("documents.reprocessAction")} ${document.file}`}>
-                <RefreshCcw className="h-4 w-4" aria-hidden="true" />
-              </Button>
-              <Button type="button" variant="ghost" size="icon" aria-label={`${t("documents.moreAction")} ${document.file}`}>
-                <MoreHorizontal className="h-4 w-4" aria-hidden="true" />
-              </Button>
-            </div>
-          </TableCell>
-        </TableRow>
-      ))}
-    </TableBody>
-  );
-}
-
-function FilterSelect({
-  label,
-  value,
-  onChange,
-  options,
-}: {
-  label: string;
-  value: string;
-  onChange: (value: string) => void;
-  options: Array<{ value: string; labelKey?: TranslationKey; label?: string }>;
-}) {
-  const { t } = useI18n();
-  return (
-    <label className="flex min-w-44 flex-col gap-2">
-      <span className="text-xs font-medium uppercase text-muted-foreground">{label}</span>
-      <select
-        className="h-9 rounded-md border border-input bg-background/65 px-3 text-sm text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-        value={value}
-        onChange={(event) => onChange(event.target.value)}
-      >
-        {options.map((option) => (
-          <option key={option.value} value={option.value}>
-            {option.labelKey ? t(option.labelKey) : option.label}
-          </option>
-        ))}
-      </select>
-    </label>
-  );
-}
-
-function SummaryCard({ label, value, tone }: { label: string; value: number; tone: "success" | "error" | "info" }) {
-  return (
-    <Card>
-      <CardContent>
-        <p className="text-xs font-medium uppercase text-muted-foreground">{label}</p>
-        <div className="mt-2 flex items-end justify-between gap-3">
-          <span className="text-3xl font-semibold text-foreground">{value}</span>
-          <Badge variant={tone}>{label}</Badge>
+    <div className="grid grid-cols-2 gap-2">
+      {metrics.map(([label, value]) => (
+        <div key={label} className="rounded-md border border-border bg-background/45 p-3">
+          <div className="text-xs uppercase text-muted-foreground">{label}</div>
+          <div className="mt-1 text-lg font-semibold text-foreground">{String(value ?? 0)}</div>
         </div>
-      </CardContent>
-    </Card>
+      ))}
+    </div>
   );
 }
 
-function statusTone(status: DocumentStatus) {
-  if (status === "parsed") return "success";
+function DetailBlock({ title, value }: { title: string; value: unknown }) {
+  return (
+    <section className="rounded-md border border-border bg-background/45 p-3">
+      <h3 className="text-xs font-medium uppercase text-muted-foreground">{title}</h3>
+      <pre className="mt-2 max-h-72 overflow-auto whitespace-pre-wrap text-xs leading-5 text-muted-foreground">
+        {JSON.stringify(value, null, 2)}
+      </pre>
+    </section>
+  );
+}
+
+function statusTone(status: string) {
+  if (status === "parsed" || status === "completed") return "success";
   if (status === "processing") return "info";
   if (status === "failed") return "error";
   return "warning";
 }
 
-function statusLabel(status: DocumentStatus, t: ReturnType<typeof useI18n>["t"]) {
-  const labels: Record<DocumentStatus, TranslationKey> = {
+function statusLabel(status: string, t: ReturnType<typeof useI18n>["t"]) {
+  const labels: Record<string, TranslationKey> = {
     pending: "common.pending",
     processing: "common.processing",
     parsed: "common.parsed",
+    needs_review: "documents.attention",
     failed: "common.failed",
   };
-  return t(labels[status]);
-}
-
-function formatLabel(format: DocumentFormat) {
-  const labels: Record<DocumentFormat, string> = {
-    xlsx: "XLSX",
-    xls: "XLS",
-    docx: "DOCX",
-    pdf_text: "PDF text",
-    pdf_ocr_candidate: "PDF OCR",
-  };
-  return labels[format];
+  return labels[status] ? t(labels[status]) : status;
 }

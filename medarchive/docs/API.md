@@ -52,7 +52,7 @@ Use the token as `Authorization: Bearer <access_token>`. Swagger/OpenAPI exposes
 
 ### `POST /admin/import/archive`
 
-Accepts a multipart ZIP upload and registers archive storage rows. The endpoint preserves the original ZIP, extracts member files into local storage, and creates pending price-document records. It does not parse file contents.
+Accepts a multipart ZIP upload and registers archive storage rows. The endpoint preserves the original ZIP, extracts member files into local storage, creates pending price-document records, and immediately enqueues the import batch for asynchronous parsing.
 
 Request:
 
@@ -66,6 +66,7 @@ Example response:
   "original_asset_id": "00000000-0000-0000-0000-000000000000",
   "extracted_files": 10,
   "price_documents": 10,
+  "processing_task_id": "celery-task-id",
   "warnings": []
 }
 ```

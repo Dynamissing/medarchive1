@@ -7,7 +7,7 @@ Define how archive files will eventually be converted into structured metadata a
 ## Bootstrap Notes
 
 - Service directory parsing is implemented for XLSX and JSON.
-- Archive ZIP ingestion is implemented only as file registration and storage.
+- Archive ZIP ingestion registers files and immediately enqueues parser processing.
 - Parser selection is implemented for registered file types.
 - XLSX extraction and XLS conversion-to-XLSX parsing are implemented.
 - DOCX extraction is implemented.
@@ -33,8 +33,8 @@ Define how archive files will eventually be converted into structured metadata a
 - ZIP imports can also run from a local path through `scripts/import_archive.py`.
 - The original ZIP and extracted member files are preserved under the configured local storage root.
 - File assets record SHA-256 hashes, size, extension, MIME guess, and storage path.
-- Each extracted member creates a pending `price_documents` row.
-- File contents are not parsed in this phase.
+- Each extracted member creates a pending `price_documents` row and the import batch is queued for asynchronous parsing.
+- If the Celery broker is unavailable during local development, the API process falls back to an in-process background parser task.
 
 ## Parser Abstraction
 
@@ -50,7 +50,7 @@ Define how archive files will eventually be converted into structured metadata a
 ## Spreadsheet Extraction
 
 - XLSX parsing supports multiple sheets, delayed header rows, two-row headers, merged header cells, category rows, empty rows, multiple price columns, and source coordinates.
-- XLS parsing requires local LibreOffice. The `.xls` file is converted to `.xlsx` in a temporary directory before using the same spreadsheet extraction logic.
+- XLS parsing requires LibreOffice. The Docker backend image installs LibreOffice Calc, and local runs can set `LIBREOFFICE_EXECUTABLE` when `soffice` is not on `PATH`. The `.xls` file is converted to `.xlsx` in a temporary directory before using the same spreadsheet extraction logic.
 - Category rows update row candidate context and are not emitted as price items.
 - Row candidates preserve all detected price variants rather than flattening to one price.
 - Each row candidate stores `sheet_name`, `row_index`, `category_path`, `raw_values`, normalized header-value pairs, `source_cells`, and `price_variants`.

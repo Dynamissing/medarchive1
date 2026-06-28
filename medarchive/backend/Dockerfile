@@ -6,6 +6,10 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 
 WORKDIR /app/backend
 
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends libreoffice-calc \
+    && rm -rf /var/lib/apt/lists/*
+
 COPY backend /app/backend
 COPY scripts /app/scripts
 RUN python -m pip install --upgrade pip && python -m pip install -e ".[dev]"

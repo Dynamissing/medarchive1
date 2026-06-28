@@ -5,7 +5,7 @@ from pathlib import Path
 from openpyxl import Workbook
 
 from app.services.parsers.base import ParserInput
-from app.services.parsers.spreadsheet import XlsParser
+from app.services.parsers.spreadsheet import XlsParser, find_libreoffice
 
 
 def test_xls_parser_converts_to_xlsx_before_parsing(tmp_path: Path, monkeypatch) -> None:
@@ -38,3 +38,12 @@ def test_xls_parser_converts_to_xlsx_before_parsing(tmp_path: Path, monkeypatch)
     assert result.row_candidates[0].values["service"] == "Ultrasound"
     assert result.row_candidates[0].price_variants[0].value == 700
     assert "XLS converted to XLSX with LibreOffice before parsing." in result.warnings
+
+
+def test_find_libreoffice_uses_configured_executable(tmp_path: Path, monkeypatch) -> None:
+    executable = tmp_path / "soffice"
+    executable.write_text("#!/bin/sh\n", encoding="utf-8")
+
+    monkeypatch.setenv("LIBREOFFICE_EXECUTABLE", str(executable))
+
+    assert find_libreoffice() == executable

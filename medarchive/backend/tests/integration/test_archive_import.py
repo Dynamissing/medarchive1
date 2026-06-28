@@ -95,6 +95,16 @@ def test_archive_upload_endpoint_creates_batch_assets_and_documents(
     client = TestClient(app)
     token = client.post("/admin/login", json={"username": "admin", "password": "admin"}).json()["access_token"]
     client.headers.update({"Authorization": f"Bearer {token}"})
+    enqueued_batches: list[str] = []
+
+    class FakeTask:
+        id = "task-import"
+
+    def fake_delay(import_batch_id: str) -> FakeTask:
+        enqueued_batches.append(import_batch_id)
+        return FakeTask()
+
+    monkeypatch.setattr("app.api.routes.admin.process_batch_task.delay", fake_delay)
 
     with archive_path.open("rb") as archive_file:
         response = client.post(
@@ -106,8 +116,10 @@ def test_archive_upload_endpoint_creates_batch_assets_and_documents(
     payload = response.json()
     assert payload["extracted_files"] == 3
     assert payload["price_documents"] == 3
+    assert payload["processing_task_id"] == "task-import"
     assert len(payload["warnings"]) == 1
-    assert db_session.scalars(select(ImportBatch)).one()
+    batch = db_session.scalars(select(ImportBatch)).one()
+    assert enqueued_batches == [str(batch.id)]
     assert len(db_session.scalars(select(FileAsset)).all()) == 4
     assert len(db_session.scalars(select(PriceDocument)).all()) == 3
     assert storage_root.exists()

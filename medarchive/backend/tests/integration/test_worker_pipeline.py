@@ -13,7 +13,7 @@ from sqlalchemy.pool import StaticPool
 
 from app.core.constants import FileAssetKind, ImportBatchStatus, PriceDocumentStatus, ProcessingStatus
 from app.db.base import Base
-from app.db.models import FileAsset, ImportBatch, PriceDocument, ProcessingEvent
+from app.db.models import FileAsset, ImportBatch, PriceDocument, PriceItemVersion, ProcessingEvent, Service
 from app.db.session import get_db
 from app.main import create_app
 from app.workers.pipeline import WorkerPipelineService
@@ -66,6 +66,38 @@ def test_worker_pipeline_processes_batch_and_keeps_failures_isolated(
         "batch_documents_enqueued",
     }
     assert any(event.status == ProcessingStatus.FAILED.value for event in events)
+
+
+def test_worker_pipeline_records_price_items_for_auto_matched_rows(
+    tmp_path: Path,
+    db_session: Session,
+) -> None:
+    batch, document, _ = create_batch_with_documents(tmp_path, db_session)
+    db_session.add(
+        Service(
+            import_batch="test",
+            source_type="fixture",
+            source_hash="blood-test",
+            code="A-1",
+            name_ru="Blood test",
+            normalized_name="blood test",
+            warnings=[],
+            raw_data={},
+        )
+    )
+    db_session.commit()
+
+    outcome = WorkerPipelineService(db_session).process_document(document.id)
+
+    db_session.refresh(document)
+    price_item = db_session.scalars(select(PriceItemVersion)).one()
+    assert outcome.status == PriceDocumentStatus.PARSED.value
+    assert document.parsed_summary["normalized_rows"] == 1
+    assert document.parsed_summary["recorded_price_items"] == 1
+    assert document.parsed_summary["auto_matched"] == 1
+    assert price_item.service_id is not None
+    assert price_item.amount == 1000
+    assert batch.id == document.import_batch_id
 
 
 def test_reprocess_service_resets_and_processes_single_document(

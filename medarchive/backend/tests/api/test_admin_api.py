@@ -166,6 +166,25 @@ def test_verification_unmatched_match_and_price_item_actions(client: TestClient,
     assert reject.json()["is_active"] is False
 
 
+def test_manual_match_and_verification_resolve(client: TestClient, db_session: Session) -> None:
+    candidate = db_session.query(MatchingCandidate).one()
+    service = db_session.query(Service).one()
+    action = db_session.query(VerificationAction).one()
+
+    manual_match = client.post(f"/admin/unmatched/{candidate.id}/match", json={"service_id": str(service.id)})
+    resolve = client.post(f"/admin/verification/{action.id}/resolve", json={"notes": "checked"})
+
+    assert manual_match.status_code == 200
+    assert manual_match.json()["status"] == VerificationActionStatus.COMPLETED.value
+    assert manual_match.json()["created_price_items"] == 1
+    assert db_session.query(MatchingCandidate).count() == 0
+    assert resolve.status_code == 200
+    assert resolve.json()["resolved_anomaly"] is True
+    db_session.refresh(action)
+    assert action.status == VerificationActionStatus.COMPLETED.value
+    assert action.notes == "checked"
+
+
 def test_dashboard_and_quality_report(client: TestClient) -> None:
     dashboard = client.get("/admin/dashboard")
     quality = client.get("/admin/reports/quality")
@@ -176,6 +195,7 @@ def test_dashboard_and_quality_report(client: TestClient) -> None:
     assert quality.status_code == 200
     assert quality.json()["parsing"][PriceDocumentStatus.PARSED.value] == 1
     assert quality.json()["matching"][MatchDecisionStatus.UNMATCHED.value] == 1
+    assert "normalization" in quality.json()
 
 
 def seed_admin_data(db: Session, tmp_path: Path) -> None:
@@ -282,7 +302,19 @@ def seed_admin_data(db: Session, tmp_path: Path) -> None:
             strategy="none",
             normalized_query="unknown row",
             source_locator={},
-            row_payload={},
+            row_payload={
+                "service_name": "Blood test",
+                "normalized_service_name": "blood test",
+                "source_code": "B-1",
+                "partner_name": "Clinic 1",
+                "effective_date": "2026-01-01",
+                "category_path": [],
+                "source_locator": {"type": "unit"},
+                "raw_values": {"name": "Blood test"},
+                "amounts": [{"label": "cash", "amount": "1100.00", "currency": "KZT", "raw_value": "1100"}],
+                "is_category_row": False,
+                "warnings": [],
+            },
             explanation={"warnings": ["No match"]},
         )
     )

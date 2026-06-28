@@ -1,11 +1,9 @@
 "use client";
 
-import { Activity, Archive, BarChart3, FileSearch, LayoutDashboard, SearchX, Settings2, ShieldCheck, Stethoscope } from "lucide-react";
+import { Archive, BarChart3, FileSearch, LayoutDashboard, SearchX, ShieldCheck, Stethoscope } from "lucide-react";
 import type { ReactNode } from "react";
 
 import { LanguageSwitcher } from "@/components/language-switcher";
-import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
 import { useI18n, type TranslationKey } from "@/i18n";
 import { cn } from "@/lib/utils";
 
@@ -72,16 +70,6 @@ function Sidebar({ activeNav }: { activeNav: NavLabel }) {
           </a>
         ))}
       </nav>
-
-      <div className="border-t border-border p-4">
-        <div className="rounded-lg border border-border bg-background/55 p-3">
-          <div className="flex items-center justify-between gap-2">
-            <span className="text-xs font-medium text-foreground">{t("app.systemStatus")}</span>
-            <Badge variant="success">{t("app.ready")}</Badge>
-          </div>
-          <p className="mt-2 text-xs leading-5">{t("app.systemStatusText")}</p>
-        </div>
-      </div>
     </aside>
   );
 }
@@ -97,15 +85,6 @@ function TopBar({ titleKey, eyebrowKey }: { titleKey: TranslationKey; eyebrowKey
         </div>
         <div className="flex items-center gap-2">
           <LanguageSwitcher />
-          <Badge variant="info" className="hidden sm:inline-flex">
-            {t("app.demoMode")}
-          </Badge>
-          <Button variant="ghost" size="icon" aria-label={t("common.status")}>
-            <Activity className="h-4 w-4" aria-hidden="true" />
-          </Button>
-          <Button variant="ghost" size="icon" aria-label={t("common.actions")}>
-            <Settings2 className="h-4 w-4" aria-hidden="true" />
-          </Button>
         </div>
       </div>
     </header>

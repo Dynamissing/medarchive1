@@ -3,7 +3,7 @@
 import { useEffect } from "react";
 import { usePathname, useSearchParams } from "next/navigation";
 
-import { absoluteUrl, createSearchSeo, siteConfig, type SeoLocale } from "@/lib/seo";
+import { absoluteUrl, createSearchSeo, htmlLocale, openGraphLocale, siteConfig, type SeoLocale } from "@/lib/seo";
 
 export function SearchMetadataUpdater({ locale = "ru" }: { locale?: SeoLocale }) {
   const pathname = usePathname();
@@ -20,11 +20,13 @@ export function SearchMetadataUpdater({ locale = "ru" }: { locale?: SeoLocale })
     setProperty("og:title", seo.title);
     setProperty("og:description", seo.description);
     setProperty("og:url", seo.canonical);
+    setProperty("og:locale", openGraphLocale(locale));
     setProperty("og:image", absoluteUrl(siteConfig.ogImage));
     setMeta("twitter:card", "summary_large_image");
     setMeta("twitter:title", seo.title);
     setMeta("twitter:description", seo.description);
     setMeta("twitter:image", absoluteUrl(siteConfig.ogImage));
+    document.documentElement.lang = htmlLocale(locale);
   }, [locale, pathname, searchParams]);
 
   return null;

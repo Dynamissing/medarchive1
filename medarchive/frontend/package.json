@@ -8,6 +8,9 @@
     "build": "next build",
     "lint": "eslint .",
     "typecheck": "tsc --noEmit",
+    "i18n:check": "node scripts/sync-translations.mjs check",
+    "i18n:sync": "node scripts/sync-translations.mjs sync",
+    "i18n:translate": "node scripts/sync-translations.mjs translate",
     "test": "npm run typecheck"
   },
   "dependencies": {

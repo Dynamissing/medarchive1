@@ -2,6 +2,7 @@
 
 import type { FormEvent } from "react";
 import { useState } from "react";
+import { useRouter } from "next/navigation";
 import { AlertCircle, Loader2, LockKeyhole, ShieldCheck } from "lucide-react";
 
 import { Badge } from "@/components/ui/badge";
@@ -10,11 +11,13 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { useI18n } from "@/i18n";
+import { adminLogin, clearAdminToken, storeAdminToken } from "@/lib/api";
 
 type LoginState = "idle" | "loading" | "error" | "success";
 
 export function LoginForm() {
   const { t } = useI18n();
+  const router = useRouter();
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
   const [state, setState] = useState<LoginState>("idle");
@@ -22,8 +25,16 @@ export function LoginForm() {
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setState("loading");
-    await mockAdminLogin();
-    setState(username.trim() === "admin" && password === "admin" ? "success" : "error");
+
+    try {
+      const result = await adminLogin(username.trim(), password);
+      storeAdminToken(result.access_token);
+      setState("success");
+      router.push("/dashboard");
+    } catch {
+      clearAdminToken();
+      setState("error");
+    }
   }
 
   const isLoading = state === "loading";
@@ -98,8 +109,4 @@ export function LoginForm() {
       </CardContent>
     </Card>
   );
-}
-
-async function mockAdminLogin() {
-  await new Promise((resolve) => window.setTimeout(resolve, 650));
 }

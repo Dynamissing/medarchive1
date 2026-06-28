@@ -1,8 +1,9 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useState } from "react";
+import Link from "next/link";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
-import { ArrowRight, Building2, Search, Stethoscope } from "lucide-react";
+import { ArrowRight, Search, Stethoscope } from "lucide-react";
 
 import { CopyLinkButton } from "@/components/copy-link-button";
 import { LanguageSwitcher } from "@/components/language-switcher";
@@ -11,28 +12,30 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { NoResults } from "@/components/ui/states";
 import { useI18n } from "@/i18n";
+import { searchBackend, type SearchResult } from "@/lib/api";
 import type { SeoLocale } from "@/lib/seo";
 import { cn } from "@/lib/utils";
-import { publicSearchResultsMock, quickExamples, topCategories, type PublicSearchResult } from "@/features/public-search/mock-data";
 
 const cityOptions = [
-  { value: "kazakhstan", label: "Казахстан" },
+  { value: "kazakhstan", label: "Kazakhstan" },
   { value: "astana", label: "Astana" },
   { value: "almaty", label: "Almaty" },
 ];
+const quickExamples: string[] = [];
+const topCategories: string[] = [];
 
-export function PublicSearchHome({ locale }: { locale?: SeoLocale }) {
+export function PublicSearchHome({}: { locale?: SeoLocale }) {
   const { t } = useI18n();
   const router = useRouter();
   const pathname = usePathname();
   const searchParams = useSearchParams();
-  const defaultQuery = locale ? "" : "blood";
+  const defaultQuery = "";
   const [query, setQuery] = useState(searchParams.get("q") ?? defaultQuery);
   const [city, setCity] = useState(searchParams.get("city") ?? "kazakhstan");
   const [category, setCategory] = useState<string>(searchParams.get("source") ?? "All");
-  const serviceId = searchParams.get("serviceId");
-  const clinicId = searchParams.get("clinicId");
-  const sort = searchParams.get("sort");
+  const [results, setResults] = useState<SearchResult[]>([]);
+  const [isLoading, setIsLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     setQuery(searchParams.get("q") ?? defaultQuery);
@@ -40,27 +43,44 @@ export function PublicSearchHome({ locale }: { locale?: SeoLocale }) {
     setCategory(searchParams.get("source") ?? "All");
   }, [defaultQuery, searchParams]);
 
-  const results = useMemo(() => {
-    const normalized = query.trim().toLowerCase();
-    return publicSearchResultsMock.filter((result) => {
-      if (serviceId && result.id !== serviceId) return false;
-      if (clinicId && result.id !== clinicId) return false;
-      const queryMatch =
-        !normalized ||
-        [result.title, result.subtitle, result.category].some((value) => value.toLowerCase().includes(normalized));
-      const categoryMatch = category === "All" || result.category === category;
-      return queryMatch && categoryMatch;
-    });
-  }, [category, clinicId, query, serviceId]);
+  useEffect(() => {
+    const currentQuery = query.trim();
+    if (!currentQuery) {
+      setResults([]);
+      setError(null);
+      setIsLoading(false);
+      return;
+    }
+
+    const controller = new AbortController();
+    setIsLoading(true);
+    setError(null);
+    searchBackend(currentQuery)
+      .then((response) => {
+        if (!controller.signal.aborted) {
+          setResults(response.items);
+        }
+      })
+      .catch((fetchError: unknown) => {
+        if (!controller.signal.aborted) {
+          setResults([]);
+          setError(fetchError instanceof Error ? fetchError.message : "Search request failed");
+        }
+      })
+      .finally(() => {
+        if (!controller.signal.aborted) {
+          setIsLoading(false);
+        }
+      });
+
+    return () => controller.abort();
+  }, [query]);
 
   function updateUrl(next: { q?: string; city?: string; source?: string }) {
     const params = new URLSearchParams(searchParams.toString());
     setParam(params, "q", next.q ?? query, defaultQuery);
     setParam(params, "city", next.city ?? city, "kazakhstan");
     setParam(params, "source", next.source ?? category, "All");
-    if (serviceId) params.set("serviceId", serviceId);
-    if (clinicId) params.set("clinicId", clinicId);
-    if (sort) params.set("sort", sort);
     const nextUrl = params.toString() ? `${pathname}?${params.toString()}` : pathname;
     router.replace(nextUrl, { scroll: false });
   }
@@ -96,7 +116,7 @@ export function PublicSearchHome({ locale }: { locale?: SeoLocale }) {
           <div className="flex items-center gap-2">
             <LanguageSwitcher />
             <Button asChild variant="secondary">
-              <a href="/login">{t("app.admin")}</a>
+              <Link href="/login">{t("app.admin")}</Link>
             </Button>
           </div>
         </div>
@@ -106,9 +126,7 @@ export function PublicSearchHome({ locale }: { locale?: SeoLocale }) {
         <div className="max-w-3xl">
           <Badge variant="info">{t("app.publicSearch")}</Badge>
           <h1 className="mt-4 text-3xl font-semibold tracking-normal text-foreground sm:text-5xl">{t("public.heroTitle")}</h1>
-          <p className="mt-4 max-w-2xl text-base leading-7 text-muted-foreground">
-            {t("public.heroText")}
-          </p>
+          <p className="mt-4 max-w-2xl text-base leading-7 text-muted-foreground">{t("public.heroText")}</p>
         </div>
 
         <div className="mt-8 rounded-lg border border-border bg-card p-3 shadow-surface">
@@ -145,19 +163,21 @@ export function PublicSearchHome({ locale }: { locale?: SeoLocale }) {
           </div>
         </div>
 
-        <div className="mt-4 flex flex-wrap gap-2">
-          <span className="mr-1 self-center text-xs font-medium uppercase text-muted-foreground">{t("public.examples")}</span>
-          {quickExamples.map((example) => (
-            <button
-              key={example}
-              type="button"
-              className="rounded-md border border-border bg-secondary px-2.5 py-1 text-xs text-secondary-foreground transition-colors hover:bg-secondary/80 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-              onClick={() => handleQueryChange(example)}
-            >
-              {example}
-            </button>
-          ))}
-        </div>
+        {quickExamples.length > 0 ? (
+          <div className="mt-4 flex flex-wrap gap-2">
+            <span className="mr-1 self-center text-xs font-medium uppercase text-muted-foreground">{t("public.examples")}</span>
+            {quickExamples.map((example) => (
+              <button
+                key={example}
+                type="button"
+                className="rounded-md border border-border bg-secondary px-2.5 py-1 text-xs text-secondary-foreground transition-colors hover:bg-secondary/80 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                onClick={() => handleQueryChange(example)}
+              >
+                {example}
+              </button>
+            ))}
+          </div>
+        ) : null}
 
         <div className="mt-8 flex flex-wrap gap-2">
           {["All", ...topCategories].map((item) => (
@@ -177,76 +197,62 @@ export function PublicSearchHome({ locale }: { locale?: SeoLocale }) {
           ))}
         </div>
 
-        <section className="mt-8 grid gap-4 lg:grid-cols-[minmax(0,1fr)_300px]">
+        <section className="mt-8 grid gap-4">
           <div className="space-y-3">
             <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
               <h2>{t("public.resultPreview")}</h2>
-              <Badge variant="neutral">{results.length} {t("public.matches")}</Badge>
+              <Badge variant={error ? "error" : isLoading ? "info" : "neutral"}>
+                {isLoading ? t("common.processing") : `${results.length} ${t("public.matches")}`}
+              </Badge>
             </div>
-            {results.length > 0 ? (
-              results.map((result) => <ResultCard key={result.id} result={result} city={city} locale={locale} />)
+            {error ? (
+              <NoResults title={t("states.retry.title")} description={error} className="min-h-48 bg-card" />
+            ) : results.length > 0 ? (
+              results.map((result) => <ResultCard key={`${result.type}-${result.id}`} result={result} city={city} />)
             ) : (
               <NoResults title={t("public.noResults.title")} description={t("public.noResults.description")} className="min-h-48 bg-card" />
             )}
           </div>
-
-          <aside className="rounded-lg border border-border bg-card p-5 shadow-surface">
-            <h2>{t("public.catalogSnapshot")}</h2>
-            <div className="mt-5 space-y-4">
-              <Metric label={t("public.reviewedServices")} value="4,812" />
-              <Metric label={t("public.activePartners")} value="38" />
-              <Metric label={t("public.currentPrices")} value="6,842" />
-            </div>
-          </aside>
         </section>
       </section>
     </main>
   );
 }
 
-function ResultCard({ result, city, locale }: { result: PublicSearchResult; city: string; locale?: SeoLocale }) {
+function ResultCard({ result, city }: { result: SearchResult; city: string }) {
   const { t } = useI18n();
-  const localePrefix = locale ? `/${locale}` : "";
-  const detailHref =
-    result.id === "svc-001"
-      ? `${localePrefix}/services/complete-blood-count?city=${encodeURIComponent(city)}`
-      : result.id === "partner-07"
-        ? `${localePrefix}/clinics/clinic-07`
-        : `${localePrefix ? `${localePrefix}/search` : "/"}?${result.type === "service" ? "serviceId" : "clinicId"}=${encodeURIComponent(result.id)}&city=${encodeURIComponent(city)}`;
+  const shareHref = `/search?${result.type === "service" ? "serviceId" : "clinicId"}=${encodeURIComponent(result.id)}&city=${encodeURIComponent(city)}`;
+
   return (
     <article className="rounded-lg border border-border bg-card p-4 shadow-surface">
       <div className="flex items-start justify-between gap-4">
         <div className="min-w-0">
-          <div className="flex items-center gap-2">
-            {result.type === "partner" ? (
-              <Building2 className="h-4 w-4 text-info" aria-hidden="true" />
-            ) : (
-              <Stethoscope className="h-4 w-4 text-primary" aria-hidden="true" />
-            )}
-            <h3 className="truncate text-base">{result.title}</h3>
-          </div>
-          <p className="mt-2">{result.subtitle}</p>
+          <h3 className="truncate text-base">{result.label}</h3>
+          <p className="mt-2">{result.type === "service" ? t("common.service") : t("common.partner")}</p>
         </div>
         <Badge variant={result.type === "partner" ? "info" : "success"}>{result.type}</Badge>
       </div>
       <div className="mt-4 grid gap-3 sm:grid-cols-3">
-        <Detail label={t("common.category")} value={categoryLabel(result.category, t)} />
-        <Detail label={t("common.priceRange")} value={result.priceRange} />
-        <Detail label={t("common.partners")} value={`${result.partnerCount}`} />
+        <Detail label={t("common.code")} value={stringValue(result.payload.code)} />
+        <Detail label={t("common.category")} value={stringValue(result.payload.category)} />
+        <Detail label={t("common.partners")} value={stringValue(result.payload.partner_count ?? result.payload.service_count ?? result.payload.active_price_count)} />
+        <Detail label={t("common.priceRange")} value={priceValue(result.payload)} />
+        <Detail label={t("common.date")} value={stringValue(result.payload.latest_effective_date)} />
       </div>
-      {result.id === "svc-001" || result.id === "partner-07" ? (
-        <div className="mt-4 flex flex-wrap gap-2">
-          <Button asChild variant="secondary">
-            <a href={detailHref}>{t("public.openDetail")}</a>
-          </Button>
-          <CopyLinkButton href={detailHref} />
-        </div>
-      ) : (
-        <div className="mt-4">
-          <CopyLinkButton href={detailHref} />
-        </div>
-      )}
+      <div className="mt-4">
+        <CopyLinkButton href={shareHref} />
+      </div>
     </article>
+  );
+}
+
+function Detail({ label, value }: { label: string; value: string }) {
+  const { t } = useI18n();
+  return (
+    <div className="rounded-md border border-border bg-background/45 p-3">
+      <div className="text-xs uppercase text-muted-foreground">{label}</div>
+      <div className="mt-1 truncate text-sm font-medium text-foreground">{value || t("common.notDetected")}</div>
+    </div>
   );
 }
 
@@ -259,24 +265,6 @@ function setParam(params: URLSearchParams, key: string, value: string, emptyValu
   params.set(key, cleaned);
 }
 
-function Detail({ label, value }: { label: string; value: string }) {
-  return (
-    <div className="rounded-md border border-border bg-background/45 p-3">
-      <div className="text-xs uppercase text-muted-foreground">{label}</div>
-      <div className="mt-1 truncate text-sm font-medium text-foreground">{value}</div>
-    </div>
-  );
-}
-
-function Metric({ label, value }: { label: string; value: string }) {
-  return (
-    <div>
-      <div className="text-2xl font-semibold text-foreground">{value}</div>
-      <div className="mt-1 text-sm text-muted-foreground">{label}</div>
-    </div>
-  );
-}
-
 function categoryLabel(category: string, t: ReturnType<typeof useI18n>["t"]) {
   const labels: Record<string, Parameters<typeof t>[0]> = {
     All: "categories.all",
@@ -287,4 +275,16 @@ function categoryLabel(category: string, t: ReturnType<typeof useI18n>["t"]) {
     "Home care": "categories.homeCare",
   };
   return labels[category] ? t(labels[category]) : category;
+}
+
+function stringValue(value: unknown) {
+  if (typeof value === "string") return value;
+  if (typeof value === "number") return String(value);
+  return "";
+}
+
+function priceValue(payload: Record<string, unknown>) {
+  const amount = stringValue(payload.latest_amount);
+  if (!amount) return "";
+  return `${amount} ${stringValue(payload.latest_currency) || "KZT"}`;
 }

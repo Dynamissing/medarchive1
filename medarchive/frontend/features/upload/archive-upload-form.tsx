@@ -1,100 +1,101 @@
 "use client";
 
 import type { ChangeEvent, DragEvent, FormEvent } from "react";
-import { useRef, useState } from "react";
-import { AlertCircle, Archive, CheckCircle2, FileArchive, Loader2, UploadCloud } from "lucide-react";
+import { useEffect, useRef, useState } from "react";
+import { AlertCircle, Archive, FileArchive, UploadCloud } from "lucide-react";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { ProcessingInProgress, RetryError } from "@/components/ui/states";
-import { useI18n, type TranslationKey } from "@/i18n";
+import { NoDataYet, ProcessingInProgress, RetryError } from "@/components/ui/states";
+import { useI18n } from "@/i18n";
+import { getImportBatches, uploadArchive, type ArchiveImportResponse, type ImportBatchSummary } from "@/lib/api";
 import { cn } from "@/lib/utils";
 
 type UploadState = "idle" | "dragging" | "uploading" | "success" | "error";
-type RecentUploadStatus = "completed" | "processing" | "failed";
-
-type RecentUpload = {
-  id: string;
-  filename: string;
-  status: RecentUploadStatus;
-  files: number;
-  uploadedAt: string;
-};
-
-const recentUploads: RecentUpload[] = [
-  { id: "up-1042", filename: "clinic-08-prices.zip", status: "processing", files: 38, uploadedAt: "9 min ago" },
-  { id: "up-1041", filename: "clinic-07-contracts.zip", status: "completed", files: 21, uploadedAt: "46 min ago" },
-  { id: "up-1040", filename: "legacy-scan-pack.zip", status: "failed", files: 14, uploadedAt: "Yesterday" },
-];
 
 export function ArchiveUploadForm() {
   const { t } = useI18n();
   const inputRef = useRef<HTMLInputElement | null>(null);
   const [state, setState] = useState<UploadState>("idle");
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
-  const [progress, setProgress] = useState(0);
-  const [messageKey, setMessageKey] = useState<TranslationKey>("upload.zipOnly");
+  const [batches, setBatches] = useState<ImportBatchSummary[]>([]);
+  const [loadingBatches, setLoadingBatches] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [result, setResult] = useState<ArchiveImportResponse | null>(null);
+
+  useEffect(() => {
+    refreshBatches();
+  }, []);
+
+  function refreshBatches() {
+    setLoadingBatches(true);
+    getImportBatches()
+      .then((response) => {
+        setBatches(response.items);
+      })
+      .catch((fetchError: unknown) => {
+        setBatches([]);
+        setError(fetchError instanceof Error ? fetchError.message : "Import batch request failed");
+      })
+      .finally(() => setLoadingBatches(false));
+  }
 
   function handleFileChange(event: ChangeEvent<HTMLInputElement>) {
-    const file = event.target.files?.[0] ?? null;
-    applySelectedFile(file);
+    applySelectedFile(event.target.files?.[0] ?? null);
   }
 
   function handleDragOver(event: DragEvent<HTMLDivElement>) {
     event.preventDefault();
-    if (state !== "uploading") {
-      setState("dragging");
-    }
+    if (state !== "uploading") setState("dragging");
   }
 
   function handleDragLeave(event: DragEvent<HTMLDivElement>) {
     event.preventDefault();
-    if (state === "dragging") {
-      setState("idle");
-    }
+    if (state === "dragging") setState("idle");
   }
 
   function handleDrop(event: DragEvent<HTMLDivElement>) {
     event.preventDefault();
-    if (state === "uploading") {
-      return;
-    }
+    if (state === "uploading") return;
     applySelectedFile(event.dataTransfer.files[0] ?? null);
   }
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    if (!selectedFile || state === "uploading") {
-      return;
-    }
+    if (!selectedFile || state === "uploading") return;
 
     setState("uploading");
-    setProgress(12);
-    setMessageKey("upload.uploading");
-    await mockUploadProgress(setProgress);
-    setState("success");
-    setProgress(100);
-    setMessageKey("upload.queued");
+    setError(null);
+    setResult(null);
+    try {
+      const uploadResult = await uploadArchive(selectedFile);
+      setResult(uploadResult);
+      setState("success");
+      setSelectedFile(null);
+      refreshBatches();
+    } catch (uploadError: unknown) {
+      setState("error");
+      setError(uploadError instanceof Error ? uploadError.message : "Archive upload failed");
+    }
   }
 
   function applySelectedFile(file: File | null) {
-    setProgress(0);
+    setResult(null);
+    setError(null);
     if (!file) {
       setSelectedFile(null);
       setState("idle");
-      setMessageKey("upload.zipOnly");
       return;
     }
     if (!isZipFile(file)) {
       setSelectedFile(null);
       setState("error");
-      setMessageKey("upload.onlyZip");
+      setError(t("upload.onlyZip"));
       return;
     }
     setSelectedFile(file);
     setState("idle");
-    setMessageKey("upload.ready");
   }
 
   const isUploading = state === "uploading";
@@ -123,15 +124,7 @@ export function ArchiveUploadForm() {
               onDrop={handleDrop}
             >
               <div className="flex h-12 w-12 items-center justify-center rounded-md border border-border bg-secondary text-muted-foreground">
-                {isUploading ? (
-                  <Loader2 className="h-6 w-6 animate-spin" aria-hidden="true" />
-                ) : state === "success" ? (
-                  <CheckCircle2 className="h-6 w-6 text-success" aria-hidden="true" />
-                ) : state === "error" ? (
-                  <AlertCircle className="h-6 w-6 text-destructive" aria-hidden="true" />
-                ) : (
-                  <UploadCloud className="h-6 w-6" aria-hidden="true" />
-                )}
+                {state === "error" ? <AlertCircle className="h-6 w-6 text-destructive" aria-hidden="true" /> : <UploadCloud className="h-6 w-6" aria-hidden="true" />}
               </div>
 
               <div className="mt-5 max-w-md">
@@ -157,22 +150,12 @@ export function ArchiveUploadForm() {
               ) : null}
             </div>
 
-            <div className="space-y-2">
-              <div className="flex items-center justify-between gap-3">
-                <span className="text-sm text-muted-foreground">{t(messageKey)}</span>
-                <span className="text-sm font-medium tabular-nums text-foreground">{progress}%</span>
+            {isUploading ? <ProcessingInProgress title={t("upload.inProgress")} description={t("upload.inProgressDesc")} /> : null}
+            {error ? <RetryError title={t("upload.rejected")} description={error} onRetry={() => applySelectedFile(null)} /> : null}
+            {result ? (
+              <div className="rounded-md border border-success/35 bg-success-subtle p-3 text-sm text-success">
+                {t("upload.queued")} · {result.extracted_files} {t("upload.files")} · {result.price_documents} {t("documents.cardTitle")}
               </div>
-              <div className="h-2 rounded-full bg-secondary">
-                <div className="h-full rounded-full bg-primary transition-all" style={{ width: `${progress}%` }} />
-              </div>
-            </div>
-
-            {state === "uploading" ? (
-              <ProcessingInProgress title={t("upload.inProgress")} description={t("upload.inProgressDesc")} />
-            ) : null}
-
-            {state === "error" ? (
-              <RetryError title={t("upload.rejected")} description={t(messageKey)} onRetry={() => applySelectedFile(null)} />
             ) : null}
 
             <div className="flex flex-col-reverse gap-3 sm:flex-row sm:items-center sm:justify-end">
@@ -180,7 +163,7 @@ export function ArchiveUploadForm() {
                 {t("common.clear")}
               </Button>
               <Button type="submit" disabled={!selectedFile || isUploading}>
-                {isUploading ? <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" /> : <Archive className="h-4 w-4" aria-hidden="true" />}
+                <Archive className="h-4 w-4" aria-hidden="true" />
                 {t("upload.submit")}
               </Button>
             </div>
@@ -196,16 +179,18 @@ export function ArchiveUploadForm() {
           </div>
         </CardHeader>
         <CardContent className="space-y-3">
-          {recentUploads.map((upload) => (
-            <div key={upload.id} className="rounded-md border border-border bg-background/45 p-3">
+          {loadingBatches ? <ProcessingInProgress /> : null}
+          {!loadingBatches && batches.length === 0 ? <NoDataYet title={t("upload.noRecent.title")} description={t("upload.noRecent.description")} className="min-h-56" /> : null}
+          {batches.map((batch) => (
+            <div key={batch.id} className="rounded-md border border-border bg-background/45 p-3">
               <div className="flex items-start justify-between gap-3">
                 <div className="min-w-0">
-                  <div className="truncate text-sm font-medium text-foreground">{upload.filename}</div>
+                  <div className="truncate text-sm font-medium text-foreground">{batch.original_filename}</div>
                   <div className="mt-1 text-xs text-muted-foreground">
-                    {upload.files} {t("upload.files")} - {upload.uploadedAt}
+                    {batch.processed_files}/{batch.total_files} · {new Date(batch.created_at).toLocaleString()}
                   </div>
                 </div>
-                <Badge variant={recentTone(upload.status)}>{recentLabel(upload.status, t)}</Badge>
+                <Badge variant={statusTone(batch.status)}>{batch.status}</Badge>
               </div>
             </div>
           ))}
@@ -219,29 +204,17 @@ function isZipFile(file: File) {
   return file.name.toLowerCase().endsWith(".zip") || file.type === "application/zip";
 }
 
-async function mockUploadProgress(setProgress: (value: number) => void) {
-  for (const value of [28, 44, 63, 81, 94]) {
-    await new Promise((resolve) => window.setTimeout(resolve, 220));
-    setProgress(value);
-  }
-}
-
 function formatBytes(bytes: number) {
-  if (bytes < 1024 * 1024) {
-    return `${Math.max(1, Math.round(bytes / 1024))} KB`;
-  }
+  if (bytes < 1024 * 1024) return `${Math.max(1, Math.round(bytes / 1024))} KB`;
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 }
 
 function stateLabel(state: UploadState, t: ReturnType<typeof useI18n>["t"]) {
-  const labels: Record<UploadState, TranslationKey> = {
-    idle: "upload.idle",
-    dragging: "upload.dropFile",
-    uploading: "upload.uploading",
-    success: "upload.queuedStatus",
-    error: "common.error",
-  };
-  return t(labels[state]);
+  if (state === "success") return t("upload.queuedStatus");
+  if (state === "uploading") return t("upload.uploading");
+  if (state === "dragging") return t("upload.dropFile");
+  if (state === "error") return t("common.error");
+  return t("upload.idle");
 }
 
 function stateTone(state: UploadState) {
@@ -251,17 +224,9 @@ function stateTone(state: UploadState) {
   return "neutral";
 }
 
-function recentLabel(status: RecentUploadStatus, t: ReturnType<typeof useI18n>["t"]) {
-  const labels: Record<RecentUploadStatus, TranslationKey> = {
-    completed: "common.completed",
-    processing: "common.processing",
-    failed: "common.failed",
-  };
-  return t(labels[status]);
-}
-
-function recentTone(status: RecentUploadStatus) {
+function statusTone(status: string) {
   if (status === "completed") return "success";
   if (status === "processing") return "info";
-  return "error";
+  if (status === "failed") return "error";
+  return "warning";
 }

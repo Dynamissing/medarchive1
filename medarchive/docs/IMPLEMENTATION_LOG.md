@@ -1,5 +1,73 @@
 # Implementation Log
 
+## 2026-06-28 - Locale-Aware UI And SEO Translation Architecture
+
+Implemented a compatibility-preserving i18n and SEO localization update for the frontend.
+
+Created files:
+
+- `frontend/messages/ru.json`
+- `frontend/messages/kz.json`
+- `frontend/messages/en.json`
+- `frontend/i18n/locales.ts`
+- `frontend/components/locale-boundary.tsx`
+- `frontend/app/[locale]/page.tsx`
+- `frontend/scripts/sync-translations.mjs`
+
+Modified files:
+
+- `frontend/i18n/index.tsx`
+- `frontend/i18n/types.ts`
+- `frontend/lib/seo.ts`
+- `frontend/app/layout.tsx`
+- `frontend/app/[locale]/search/page.tsx`
+- `frontend/app/[locale]/services/complete-blood-count/page.tsx`
+- `frontend/app/[locale]/clinics/clinic-07/page.tsx`
+- `frontend/components/language-switcher.tsx`
+- `frontend/components/copy-link-button.tsx`
+- `frontend/components/search-metadata-updater.tsx`
+- `frontend/app/robots.ts`
+- `frontend/app/sitemap.ts`
+- `frontend/package.json`
+- Public service/search/clinic metadata wrappers
+
+Behavior changes:
+
+- Added locale message files as the gradual migration source while preserving the existing `useI18n()` and flat-key dictionary fallback.
+- Public `/ru`, `/kz`, and `/en` routes now bind UI locale from the URL instead of localStorage.
+- The language switcher changes localized public URL segments and preserves query parameters; admin/private routes continue using local UI state only.
+- SEO metadata now uses localized message templates for home, search, service, clinic, login, and shared site metadata.
+- `/kz` remains the route convention while Kazakh SEO uses `kk_KZ`; runtime document language is set to `kk-KZ`.
+- Sitemap now includes localized home/search/service/clinic routes and excludes arbitrary query URLs.
+- Added optional translation sync tooling with `i18n:check`, `i18n:sync`, and `i18n:translate`; OpenRouter is optional and not required for build/runtime.
+
+Commands run:
+
+- `npm run i18n:check`
+- `npm run typecheck`
+- `npm run lint`
+- `npm run build`
+- Node-based exported HTML checks for `out/ru/search.html`, `out/kz/search.html`, and `out/en/search.html`
+- `Get-Content frontend\out\robots.txt`
+- `Get-Content frontend\out\sitemap.xml`
+
+Verification results:
+
+- `npm run i18n:check` passed for `ru`, `kz`, and `en`.
+- Frontend typecheck passed.
+- Frontend lint passed.
+- Frontend production build passed and generated 27 static routes.
+- Exported search HTML for `ru`, `kz`, and `en` contains localized title, description, canonical, Open Graph, and Twitter tags.
+- Exported `/kz/search.html` keeps `/kz/search` canonical/alternate URLs and includes `og:locale` as `kk_KZ`.
+- Exported `robots.txt` disallows admin/private pages.
+- Exported `sitemap.xml` includes localized public pages.
+
+Known limitations:
+
+- Because the app still has a single root `app/layout.tsx`, exported source HTML contains the root `lang="ru"` attribute for all routes. A small inline script and the i18n provider set `document.documentElement.lang` to `kk-KZ` or `en` immediately on localized routes; a full source-HTML fix would require restructuring the root route layout.
+- With `output: "export"`, arbitrary query-specific search metadata is still a client-side progressive enhancement, not pre-rendered static HTML.
+- Machine-generated translations are optional and can be imperfect for medical terms; Kazakh and English medical terminology should be reviewed later.
+
 ## 2026-06-27 - Frontend SEO Metadata And Shareable Search URLs
 
 Added focused frontend SEO and share-link support for MedPrice public routes.
@@ -1189,3 +1257,174 @@ Known limitations:
 - Frontend remains a static placeholder, not a full review UI.
 - The demo data is synthetic; real attached XLSX/ZIP files still require approved-data verification on a running local stack.
 - Generated demo files are not committed and should be recreated with `python scripts/seed_demo_data.py` before running the documented import flow.
+
+## 2026-06-28 - Manual testing roadmap
+
+Created files:
+
+- `docs/MANUAL_TESTING_ROADMAP.md`
+
+Files read:
+
+- `README.md`
+- `.env.example`
+- `docker-compose.yml`
+- `Makefile`
+- `docs/PROJECT_STATE.md`
+- `docs/TASKS.md`
+- `docs/API.md`
+- `docs/DEMO_SCRIPT.md`
+- `docs/IMPLEMENTATION_LOG.md`
+- Backend route/model files under `backend/app`
+- Frontend route/component/package files under `frontend`
+- Helper scripts under `scripts`
+
+Behavior changes:
+
+- None. Documentation-only change.
+
+Verification performed:
+
+- Inspected actual startup commands, Docker services, Make targets, frontend routes, backend API routes, model table names, scripts, and documented demo flow.
+- Created a Russian manual QA roadmap covering project startup, test data, public pages, search, admin pages, import/parser flow, API checks, database SQL checks, multilingual testing, responsive QA, error states, demo readiness, risks, go/no-go criteria, known limitations, and recommended future automated tests.
+
+Known limitations:
+
+- No runtime tests were executed for this documentation-only update.
+- The roadmap marks frontend mock/live API gaps and unverified real attached data imports as testing risks based on the current project documentation and code inspection.
+
+## 2026-06-28 - Remove frontend placeholder data and connect admin login
+
+Created files:
+
+- `frontend/features/dashboard/data.ts`
+- `frontend/features/documents/data.ts`
+- `frontend/features/partner-detail/data.ts`
+- `frontend/features/quality/data.ts`
+- `frontend/features/service-detail/data.ts`
+- `frontend/features/unmatched/data.ts`
+- `frontend/features/verification/data.ts`
+
+Modified files:
+
+- `.env.example`
+- `.gitignore`
+- `docker-compose.yml`
+- `backend/app/core/config.py`
+- `backend/app/main.py`
+- Frontend public/admin pages and components under `frontend/app`, `frontend/components`, and `frontend/features`
+- `frontend/i18n/dictionaries.ts`
+- `frontend/messages/*.json`
+- `frontend/app/sitemap.ts`
+- `docs/MANUAL_TESTING_ROADMAP.md`
+
+Removed files:
+
+- `frontend/features/*/mock-data.ts` placeholder data files
+- `frontend/features/public-search/mock-data.ts`
+
+Behavior changes:
+
+- Removed displayed placeholder/demo records from dashboard, documents, archive uploads, verification, unmatched matching, quality report, public search, service detail, and clinic detail screens.
+- Replaced fake rows, prices, ZIP names, clinic names, quality metrics, result cards, and manual fake loading controls with honest empty states or disabled controls.
+- Archive upload no longer simulates successful progress; it reports that frontend upload API wiring is not connected yet.
+- Admin login now calls the real backend `POST /admin/login`, stores the returned bearer token in `localStorage`, and redirects to `/dashboard` only after a successful response.
+- Added `NEXT_PUBLIC_API_BASE_URL` and `CORS_ORIGINS` local configuration.
+- Added FastAPI CORS middleware for configured frontend origins.
+- Removed demo service/clinic routes from sitemap and changed their metadata/content to neutral empty states.
+- Added generated frontend artifacts to `.gitignore`.
+
+Commands run:
+
+- `rg` checks for placeholder terms in frontend source and exported `frontend/out`
+- `npm run typecheck`
+- `npm run lint`
+- `npm run i18n:check`
+- `npm run build`
+- `python -m compileall -q app`
+- `pytest -q`
+- `docker compose config --quiet`
+
+Verification results:
+
+- Frontend typecheck passed.
+- Frontend lint passed.
+- i18n key structure check passed.
+- Next static export build passed.
+- Backend compile check passed.
+- Backend test suite passed with `65 passed`.
+- Docker Compose config validation passed.
+- Grep checks found no remaining visible frontend placeholder terms such as fake clinic names, fake ZIP names, `mock`, or demo metrics outside generated/ignored artifacts.
+
+Known limitations:
+
+- Most frontend admin/public data screens now show empty states because live API adapters are still not implemented for those pages.
+- Archive upload from the frontend is intentionally not wired yet; real archive import still works through Swagger or CLI.
+- Admin bearer token is stored in localStorage for hackathon simplicity and should be revisited for production security.
+
+## 2026-06-28 - P0 frontend-backend wiring
+
+Created files:
+
+- `docs/FRONTEND_BACKEND_WIRING_AUDIT.md`
+- `frontend/lib/api.ts`
+
+Modified files:
+
+- `frontend/components/login-form.tsx`
+- `frontend/features/public-search/public-search-home.tsx`
+- `frontend/features/dashboard/dashboard-page.tsx`
+- `frontend/features/documents/documents-page.tsx`
+- `frontend/features/upload/archive-upload-form.tsx`
+- `frontend/features/quality/quality-report-page.tsx`
+- `frontend/features/unmatched/unmatched-page.tsx`
+- `frontend/features/verification/verification-page.tsx`
+- `frontend/i18n/dictionaries.ts`
+- `docs/MANUAL_TESTING_ROADMAP.md`
+- `docs/FRONTEND_BACKEND_WIRING_AUDIT.md`
+
+Removed files:
+
+- `frontend/features/dashboard/data.ts`
+- `frontend/features/documents/data.ts`
+- `frontend/features/partner-detail/data.ts`
+- `frontend/features/quality/data.ts`
+- `frontend/features/service-detail/data.ts`
+- `frontend/features/unmatched/data.ts`
+- `frontend/features/verification/data.ts`
+
+Behavior changes:
+
+- Added a shared frontend API helper using `NEXT_PUBLIC_API_BASE_URL`, bearer token attachment, consistent error parsing, and 401 handling.
+- Connected localized search pages to real `GET /search` for non-empty `q` while preserving unsupported `city` params in the URL.
+- Connected dashboard, documents, archive upload/import batches, quality report, unmatched queue, and verification queue pages to real backend endpoints.
+- Archive upload now sends multipart field `file` to `POST /admin/import/archive` and no longer fakes successful uploads.
+- Admin pages keep honest loading, empty, and error states when backend data or auth is unavailable.
+- Removed leftover unused empty frontend data modules from the previous placeholder-removal step.
+
+Commands run:
+
+- `npm run i18n:check`
+- `npm run typecheck`
+- `npm run lint`
+- `npm run build`
+- `pytest -q`
+- `docker compose config --quiet`
+- `rg` checks for old mock imports and fake ZIP/clinic names
+
+Verification results:
+
+- i18n key structure check passed.
+- Frontend typecheck passed.
+- Frontend lint passed.
+- Next static export build passed.
+- Backend test suite passed with `65 passed`.
+- Docker Compose config validation passed.
+- Grep checks found no remaining references to old fake ZIP names, mock imports, or removed queue data constants in frontend source.
+
+Known limitations:
+
+- `/search` backend does not support city filtering yet; frontend preserves `city` in shareable URLs but only sends `q`.
+- Service/partner catalog and detail routes remain P1 because stable id/slug mapping needs a separate wiring pass.
+- Preview, process/reprocess, match, verify, and reject actions remain P1.
+- Admin bearer token remains in localStorage for hackathon simplicity.

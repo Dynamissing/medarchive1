@@ -32,6 +32,7 @@ class PriceDocumentStatus(StrEnum):
     PENDING = "pending"
     PROCESSING = "processing"
     PARSED = "parsed"
+    NEEDS_REVIEW = "needs_review"
     FAILED = "failed"
 
 

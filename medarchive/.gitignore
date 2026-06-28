@@ -4,6 +4,8 @@ __pycache__/
 .pytest_cache/
 node_modules/
 .next/
+frontend/out/
+*.tsbuildinfo
 dist/
 build/
 *.log

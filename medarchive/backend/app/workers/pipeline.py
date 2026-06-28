@@ -6,12 +6,24 @@ from uuid import UUID
 from sqlalchemy import select
 from sqlalchemy.orm import Session, selectinload
 
-from app.core.constants import ImportBatchStatus, PriceDocumentStatus, ProcessingStatus
+from app.core.constants import AnomalySeverity, ImportBatchStatus, MatchDecisionStatus, PriceDocumentStatus, ProcessingStatus
 from app.core.logging import get_logger
 from app.db.models import ImportBatch, PriceDocument, ProcessingEvent
+from app.schemas.parsed_document import ParsedDocumentResult
 from app.services.document_processing import DocumentProcessingService, UnsupportedDocumentFormatError
+from app.services.matching.engine import LayeredMatchingEngine
+from app.services.normalization.row_normalization import (
+    PriceItemPayload,
+    normalize_docx_table_row,
+    normalize_pdf_candidate,
+    normalize_spreadsheet_candidate,
+)
+from app.services.validation.price_history import PriceHistoryService
+from app.services.validation.rules import ValidationIssue
 
 logger = get_logger(__name__)
+ROW_SAMPLE_LIMIT = 10
+TEXT_PREVIEW_LIMIT = 4000
 
 
 @dataclass(frozen=True)
@@ -92,16 +104,12 @@ class WorkerPipelineService:
 
         try:
             parsed = self.document_processor.parse_price_document(document)
-            summary = {
-                "parser_name": parsed.parser_name,
-                "parser_format": parsed.parser_format,
-                "status": parsed.status,
-                "warnings": parsed.warnings,
-                "tables": len(parsed.tables),
-                "row_candidates": len(parsed.row_candidates),
-                "pdf_row_candidates": len(parsed.pdf_row_candidates),
-            }
-            document.status = PriceDocumentStatus.PARSED.value
+            summary = self.process_parsed_result(document, parsed)
+            document.status = (
+                PriceDocumentStatus.PARSED.value
+                if summary["normalized_rows"] > 0
+                else PriceDocumentStatus.NEEDS_REVIEW.value
+            )
             document.progress_percent = 100
             document.parsed_summary = summary
             document.warnings = list(parsed.warnings)
@@ -119,6 +127,86 @@ class WorkerPipelineService:
             return DocumentProcessingOutcome(document.id, document.status, summary)
         except (UnsupportedDocumentFormatError, FileNotFoundError, RuntimeError, ValueError) as exc:
             return self.fail_document(document, exc)
+
+    def process_parsed_result(self, document: PriceDocument, parsed: ParsedDocumentResult) -> dict:
+        rows = normalize_parsed_rows(document, parsed)
+        history_service = PriceHistoryService(self.db)
+        matching_engine = LayeredMatchingEngine(self.db)
+        auto_matched = 0
+        needs_review = 0
+        unmatched = 0
+        recorded_price_items = 0
+        normalization_warnings: list[str] = []
+        row_samples: list[dict] = []
+
+        for row in rows:
+            normalization_warnings.extend(row.warnings)
+            match = matching_engine.match_row(row, persist_review=True, price_document_id=document.id)
+            service_id = match.candidates[0].service_id if match.candidates and match.decision_status == MatchDecisionStatus.AUTO_ACCEPT else None
+            if match.decision_status == MatchDecisionStatus.AUTO_ACCEPT:
+                auto_matched += 1
+            elif match.decision_status == MatchDecisionStatus.NEEDS_REVIEW:
+                needs_review += 1
+            else:
+                unmatched += 1
+            versions = history_service.validate_and_record(row, service_id=service_id, price_document_id=document.id)
+            recorded_price_items += len(versions)
+            if len(row_samples) < ROW_SAMPLE_LIMIT:
+                row_samples.append(
+                    {
+                        "service_name": row.service_name,
+                        "normalized_service_name": row.normalized_service_name,
+                        "partner_name": row.partner_name,
+                        "effective_date": row.effective_date.isoformat() if row.effective_date else None,
+                        "amounts": [amount.model_dump(mode="json") for amount in row.amounts],
+                        "source_locator": row.source_locator,
+                        "match_status": match.decision_status.value,
+                        "top_candidate": match.candidates[0].model_dump(mode="json") if match.candidates else None,
+                        "warnings": row.warnings,
+                    }
+                )
+
+        if not rows:
+            history_service.persist_issue(
+                ValidationIssue(
+                    code="document_no_parseable_rows",
+                    severity=AnomalySeverity.ERROR,
+                    message="Document did not produce any normalized price rows.",
+                    payload={"price_document_id": str(document.id), "parser_format": parsed.parser_format},
+                    action_type="review_document_no_parseable_rows",
+                ),
+                subject_type="price_document",
+                subject_id=str(document.id),
+                payload={"warnings": parsed.warnings},
+            )
+
+        total_candidates = len(parsed.row_candidates) + len(parsed.pdf_row_candidates) + docx_table_row_count(parsed)
+        return {
+            "parser_name": parsed.parser_name,
+            "parser_format": parsed.parser_format,
+            "status": parsed.status,
+            "warnings": parsed.warnings,
+            "parser_warnings": parsed.warnings,
+            "tables": len(parsed.tables),
+            "tables_count": len(parsed.tables),
+            "row_candidates": len(parsed.row_candidates),
+            "pdf_row_candidates": len(parsed.pdf_row_candidates),
+            "docx_table_rows": docx_table_row_count(parsed),
+            "candidate_rows": total_candidates,
+            "normalized_rows": len(rows),
+            "recorded_price_items": recorded_price_items,
+            "auto_matched": auto_matched,
+            "needs_review": needs_review,
+            "unmatched": unmatched,
+            "matching": {
+                "auto_matched": auto_matched,
+                "needs_review": needs_review,
+                "unmatched": unmatched,
+            },
+            "normalization_warnings": normalization_warnings[:ROW_SAMPLE_LIMIT],
+            "row_samples": row_samples,
+            "extracted_text_preview": (parsed.extracted_text or "")[:TEXT_PREVIEW_LIMIT],
+        }
 
     def fail_document(self, document: PriceDocument, exc: Exception) -> DocumentProcessingOutcome:
         message = str(exc)
@@ -167,7 +255,9 @@ class WorkerPipelineService:
             return
         documents = self.db.scalars(select(PriceDocument).where(PriceDocument.import_batch_id == import_batch_id)).all()
         batch.total_files = len(documents)
-        batch.processed_files = sum(1 for document in documents if document.status == PriceDocumentStatus.PARSED.value)
+        batch.processed_files = sum(
+            1 for document in documents if document.status in {PriceDocumentStatus.PARSED.value, PriceDocumentStatus.NEEDS_REVIEW.value}
+        )
         batch.failed_files = sum(1 for document in documents if document.status == PriceDocumentStatus.FAILED.value)
         if documents and batch.processed_files + batch.failed_files == len(documents):
             batch.status = ImportBatchStatus.COMPLETED.value if batch.failed_files == 0 else ImportBatchStatus.FAILED.value
@@ -200,3 +290,26 @@ class WorkerPipelineService:
         if batch.total_files <= 0:
             return 0
         return int(((batch.processed_files + batch.failed_files) / batch.total_files) * 100)
+
+
+def normalize_parsed_rows(document: PriceDocument, parsed: ParsedDocumentResult) -> list[PriceItemPayload]:
+    source_filename = document.file_asset.original_filename if document.file_asset else None
+    rows: list[PriceItemPayload] = []
+    for candidate in parsed.row_candidates:
+        row = normalize_spreadsheet_candidate(candidate, source_filename=source_filename, document_text=parsed.extracted_text)
+        if row is not None:
+            rows.append(row)
+    for candidate in parsed.pdf_row_candidates:
+        row = normalize_pdf_candidate(candidate, source_filename=source_filename, document_text=parsed.extracted_text)
+        if row is not None:
+            rows.append(row)
+    for table in parsed.tables:
+        for table_row in table.get("rows", []):
+            row = normalize_docx_table_row(table_row, source_filename=source_filename, document_text=parsed.extracted_text)
+            if row is not None:
+                rows.append(row)
+    return rows
+
+
+def docx_table_row_count(parsed: ParsedDocumentResult) -> int:
+    return sum(len(table.get("rows", [])) for table in parsed.tables)

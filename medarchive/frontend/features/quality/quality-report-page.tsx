@@ -1,181 +1,121 @@
 "use client";
 
-import { Download, FileWarning, GitBranch, ShieldAlert } from "lucide-react";
+import { useEffect, useState } from "react";
+import { Download } from "lucide-react";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { NoDataYet, ProcessingInProgress, RetryError } from "@/components/ui/states";
 import { useI18n } from "@/i18n";
-import {
-  anomalySections,
-  batchSummaries,
-  headlineMetrics,
-  normalizationFunnel,
-  unmatchedSections,
-  type BatchQualitySummary,
-  type FunnelStep,
-  type QualityMetric,
-} from "@/features/quality/mock-data";
+import { getQualityReport, type QualityReportResponse } from "@/lib/api";
 
 export function QualityReportPage() {
   const { t } = useI18n();
+  const [data, setData] = useState<QualityReportResponse | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    let mounted = true;
+    setLoading(true);
+    setError(null);
+    getQualityReport()
+      .then((response) => {
+        if (mounted) setData(response);
+      })
+      .catch((fetchError: unknown) => {
+        if (mounted) setError(fetchError instanceof Error ? fetchError.message : "Quality report request failed");
+      })
+      .finally(() => {
+        if (mounted) setLoading(false);
+      });
+    return () => {
+      mounted = false;
+    };
+  }, []);
+
+  const parsingTotal = sumValues(data?.parsing);
+  const matchingTotal = sumValues(data?.matching);
+  const validationTotal = sumValues(data?.validation);
+  const activePrices = data?.price_history.active ?? 0;
+
   return (
     <div className="space-y-5">
       <section className="flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
         <div>
           <Badge variant="info">{t("quality.title")}</Badge>
           <h1 className="mt-3 text-3xl font-semibold text-foreground">{t("quality.headline")}</h1>
-          <p className="mt-2 max-w-2xl text-sm leading-6 text-muted-foreground">
-            {t("quality.desc")}
-          </p>
+          <p className="mt-2 max-w-2xl text-sm leading-6 text-muted-foreground">{t("quality.desc")}</p>
         </div>
-        <Button variant="secondary">
+        <Button variant="secondary" disabled>
           <Download className="h-4 w-4" aria-hidden="true" />
           {t("quality.export")}
         </Button>
       </section>
 
+      {loading ? <ProcessingInProgress /> : null}
+      {error ? <RetryError description={error} onRetry={() => window.location.reload()} /> : null}
+
       <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-        {headlineMetrics.map((metric) => (
-          <MetricCard key={metric.label} metric={metric} />
-        ))}
+        <MetricCard label={t("documents.total")} value={parsingTotal} detail={t("dashboard.documents")} tone="info" />
+        <MetricCard label={t("dashboard.activePrices")} value={activePrices} detail={t("public.currentPrices")} tone="success" />
+        <MetricCard label={t("dashboard.needsReview")} value={matchingTotal} detail={t("dashboard.matchingDistribution")} tone="warning" />
+        <MetricCard label={t("dashboard.anomalies")} value={validationTotal} detail={t("quality.anomalySections")} tone="error" />
       </section>
 
       <section className="grid gap-5 xl:grid-cols-[minmax(0,1fr)_360px]">
-        <Card>
-          <CardHeader>
-            <div>
-              <CardTitle>{t("quality.funnel")}</CardTitle>
-              <CardDescription>{t("quality.funnelDesc")}</CardDescription>
-            </div>
-          </CardHeader>
-          <CardContent className="space-y-4">
-            {normalizationFunnel.map((step) => (
-              <FunnelRow key={step.label} step={step} />
-            ))}
-          </CardContent>
-        </Card>
+        <MetricMapCard title={t("quality.funnel")} description={t("quality.funnelDesc")} values={data?.parsing} />
+        <MetricMapCard title={t("quality.unmatchedDrivers")} description={t("quality.unmatchedDesc")} values={data?.matching} />
+      </section>
 
-        <Card>
-          <CardHeader>
-            <div>
-              <CardTitle>{t("quality.unmatchedDrivers")}</CardTitle>
-              <CardDescription>{t("quality.unmatchedDesc")}</CardDescription>
-            </div>
-          </CardHeader>
-          <CardContent className="space-y-3">
-            {unmatchedSections.map((section) => (
-              <div key={section.label} className="flex items-center justify-between rounded-md border border-border bg-background/45 p-3">
-                <div className="flex items-center gap-3">
-                  <GitBranch className="h-4 w-4 text-info" aria-hidden="true" />
-                  <span className="text-sm text-foreground">{section.label}</span>
-                </div>
-                <Badge variant="warning">{section.count}</Badge>
-              </div>
-            ))}
-          </CardContent>
-        </Card>
+      <section className="grid gap-5 xl:grid-cols-[minmax(0,1fr)_360px]">
+        <MetricMapCard title="Extraction" description="Parser row output and empty-document signals." values={data?.extraction} />
+        <MetricMapCard title="Normalization" description="Recorded rows, matching split, and normalization rate." values={data?.normalization} />
       </section>
 
       <section className="grid gap-5 lg:grid-cols-[minmax(0,1fr)_360px]">
-        <Card>
-          <CardHeader>
-            <div>
-              <CardTitle>{t("quality.batchSummaries")}</CardTitle>
-              <CardDescription>{t("quality.batchDesc")}</CardDescription>
-            </div>
-          </CardHeader>
-          <CardContent className="grid gap-3 md:grid-cols-3">
-            {batchSummaries.map((batch) => (
-              <BatchCard key={batch.id} batch={batch} />
-            ))}
-          </CardContent>
-        </Card>
-
-        <Card>
-          <CardHeader>
-            <div>
-              <CardTitle>{t("quality.anomalySections")}</CardTitle>
-              <CardDescription>{t("quality.anomalyDesc")}</CardDescription>
-            </div>
-          </CardHeader>
-          <CardContent className="space-y-3">
-            {anomalySections.map((section) => (
-              <div key={section.label} className="rounded-md border border-border bg-background/45 p-3">
-                <div className="flex items-center justify-between gap-3">
-                  <div className="flex items-center gap-3">
-                    <ShieldAlert className="h-4 w-4 text-destructive" aria-hidden="true" />
-                    <span className="text-sm font-medium text-foreground">{section.label}</span>
-                  </div>
-                  <Badge variant={section.severity === "high" ? "error" : section.severity === "medium" ? "warning" : "info"}>{section.count}</Badge>
-                </div>
-              </div>
-            ))}
-          </CardContent>
-        </Card>
+        <MetricMapCard title={t("quality.batchSummaries")} description={t("quality.batchDesc")} values={data?.price_history} />
+        <MetricMapCard title={t("quality.anomalySections")} description={t("quality.anomalyDesc")} values={data?.validation} />
       </section>
     </div>
   );
 }
 
-function MetricCard({ metric }: { metric: QualityMetric }) {
+function MetricCard({ label, value, detail, tone }: { label: string; value: number; detail: string; tone: "success" | "warning" | "error" | "info" }) {
   return (
     <Card>
       <CardContent>
-        <p className="text-xs font-medium uppercase text-muted-foreground">{metric.label}</p>
-        <div className="mt-2 text-3xl font-semibold text-foreground">{metric.value}</div>
-        <Badge variant={metric.tone} className="mt-3">
-          {metric.detail}
-        </Badge>
+        <p className="text-xs font-medium uppercase text-muted-foreground">{label}</p>
+        <div className="mt-2 text-3xl font-semibold text-foreground">{value.toLocaleString()}</div>
+        <Badge variant={tone} className="mt-3">{detail}</Badge>
       </CardContent>
     </Card>
   );
 }
 
-function FunnelRow({ step }: { step: FunnelStep }) {
+function MetricMapCard({ title, description, values }: { title: string; description: string; values?: Record<string, unknown> }) {
+  const entries = Object.entries(values ?? {});
   return (
-    <div>
-      <div className="mb-2 flex items-center justify-between gap-3">
-        <div className="flex items-center gap-2">
-          <Badge variant={step.tone}>{step.percent}%</Badge>
-          <span className="text-sm font-medium text-foreground">{step.label}</span>
+    <Card>
+      <CardHeader>
+        <div>
+          <CardTitle>{title}</CardTitle>
+          <CardDescription>{description}</CardDescription>
         </div>
-        <span className="text-sm tabular-nums text-muted-foreground">{step.count}</span>
-      </div>
-      <div className="h-2 rounded-full bg-secondary">
-        <div className="h-full rounded-full bg-primary" style={{ width: `${step.percent}%` }} />
-      </div>
-    </div>
+      </CardHeader>
+      <CardContent className="space-y-3">
+        {entries.length > 0 ? entries.map(([key, value]) => (
+          <div key={key} className="flex items-center justify-between gap-3 rounded-md border border-border bg-background/45 p-3">
+            <span className="text-sm text-muted-foreground">{key}</span>
+            <Badge variant="info">{String(value)}</Badge>
+          </div>
+        )) : <NoDataYet />}
+      </CardContent>
+    </Card>
   );
 }
 
-function BatchCard({ batch }: { batch: BatchQualitySummary }) {
-  const { t } = useI18n();
-  return (
-    <div className="rounded-md border border-border bg-background/45 p-3">
-      <div className="flex items-start justify-between gap-3">
-        <div className="min-w-0">
-          <div className="truncate text-sm font-medium text-foreground">{batch.name}</div>
-          <div className="mt-1 text-xs text-muted-foreground">{batch.documents} {t("documents.cardTitle")}</div>
-        </div>
-        <FileWarning className="h-4 w-4 text-muted-foreground" aria-hidden="true" />
-      </div>
-      <div className="mt-4 grid grid-cols-3 gap-2 text-center">
-        <MiniStat label={t("common.parsed")} value={batch.parsed} tone="success" />
-        <MiniStat label={t("common.review")} value={batch.review} tone="warning" />
-        <MiniStat label={t("common.failed")} value={batch.failed} tone="error" />
-      </div>
-    </div>
-  );
-}
-
-function MiniStat({ label, value, tone }: { label: string; value: number; tone: "success" | "warning" | "error" }) {
-  return (
-    <div className="rounded-md bg-card p-2">
-      <div className="text-sm font-semibold text-foreground">{value}</div>
-      <Badge variant={tone} className="mt-2">
-        {label}
-      </Badge>
-    </div>
-  );
+function sumValues(values?: Record<string, number>) {
+  return Object.values(values ?? {}).reduce((sum, value) => sum + value, 0);
 }

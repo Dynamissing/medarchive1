@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 import re
 import shutil
 import subprocess
@@ -326,11 +327,23 @@ def convert_xls_to_xlsx(source_path: Path) -> Path:
 
 
 def find_libreoffice() -> Path | None:
+    configured = os.getenv("LIBREOFFICE_EXECUTABLE")
+    if configured:
+        configured_path = Path(configured)
+        if configured_path.exists():
+            return configured_path
+        found_configured = shutil.which(configured)
+        if found_configured:
+            return Path(found_configured)
+
     for executable in ("soffice", "libreoffice"):
         found = shutil.which(executable)
         if found:
             return Path(found)
     for candidate in (
+        Path("/usr/bin/soffice"),
+        Path("/usr/bin/libreoffice"),
+        Path("/usr/lib/libreoffice/program/soffice"),
         Path("C:/Program Files/LibreOffice/program/soffice.exe"),
         Path("C:/Program Files (x86)/LibreOffice/program/soffice.exe"),
     ):

@@ -44,6 +44,7 @@ services:
       REDIS_URL: redis://redis:6379/0
       CELERY_TASK_ALWAYS_EAGER: "${CELERY_TASK_ALWAYS_EAGER:-false}"
       FILE_STORAGE_ROOT: /app/data/storage
+      LIBREOFFICE_EXECUTABLE: "${LIBREOFFICE_EXECUTABLE:-/usr/bin/soffice}"
       ADMIN_USERNAME: "${ADMIN_USERNAME:-admin}"
       ADMIN_PASSWORD: "${ADMIN_PASSWORD:-admin}"
       ADMIN_TOKEN_SECRET: "${ADMIN_TOKEN_SECRET:-change-me-for-demo}"
@@ -81,6 +82,7 @@ services:
       REDIS_URL: redis://redis:6379/0
       CELERY_TASK_ALWAYS_EAGER: "${CELERY_TASK_ALWAYS_EAGER:-false}"
       FILE_STORAGE_ROOT: /app/data/storage
+      LIBREOFFICE_EXECUTABLE: "${LIBREOFFICE_EXECUTABLE:-/usr/bin/soffice}"
       ADMIN_USERNAME: "${ADMIN_USERNAME:-admin}"
       ADMIN_PASSWORD: "${ADMIN_PASSWORD:-admin}"
       ADMIN_TOKEN_SECRET: "${ADMIN_TOKEN_SECRET:-change-me-for-demo}"

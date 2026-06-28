@@ -18,6 +18,7 @@ class Settings(BaseSettings):
     log_level: str = Field(default="INFO", validation_alias="APP_LOG_LEVEL")
     backend_host: str = Field(default="127.0.0.1", validation_alias="BACKEND_HOST")
     backend_port: int = Field(default=8000, validation_alias="BACKEND_PORT")
+    cors_origins: str = Field(default="http://localhost:3000", validation_alias="CORS_ORIGINS")
     file_storage_root: Path = Field(default=PROJECT_DIR / "data" / "storage", validation_alias="FILE_STORAGE_ROOT")
     database_url: str = Field(
         default="postgresql+psycopg://medarchive:medarchive@localhost:5432/medarchive",

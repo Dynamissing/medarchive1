@@ -217,7 +217,7 @@ def search(
                     id=str(service.id),
                     label=service.name_ru,
                     score=score_text(q, service.name_ru, service.code, service.category),
-                    payload=service_summary(service).model_dump(mode="json"),
+                    payload={**service_summary(service).model_dump(mode="json"), **service_price_payload(db, service.id)},
                 )
             )
     if type in (None, SearchType.PARTNER):
@@ -337,6 +337,28 @@ def partner_service_summary(
         currency=version.currency,
         effective_date=version.effective_date,
     )
+
+
+def service_price_payload(db: Session, service_id: UUID) -> dict:
+    versions = db.scalars(
+        select(PriceItemVersion)
+        .where(
+            PriceItemVersion.service_id == service_id,
+            PriceItemVersion.is_active.is_(True),
+        )
+        .order_by(PriceItemVersion.effective_date.desc().nullslast(), PriceItemVersion.created_at.desc())
+    ).all()
+    if not versions:
+        return {"partner_count": 0, "active_price_count": 0}
+    partner_names = {version.partner_name for version in versions if version.partner_name}
+    latest = versions[0]
+    return {
+        "partner_count": len(partner_names),
+        "active_price_count": len(versions),
+        "latest_amount": str(latest.amount),
+        "latest_currency": latest.currency,
+        "latest_effective_date": latest.effective_date.isoformat() if latest.effective_date else None,
+    }
 
 
 def partner_id_for_name(name: str) -> str:
