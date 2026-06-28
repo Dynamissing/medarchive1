@@ -1,8 +1,9 @@
 from __future__ import annotations
 
+from datetime import datetime
 from uuid import UUID, uuid4
 
-from sqlalchemy import ForeignKey, Integer, JSON, String, Text
+from sqlalchemy import DateTime, ForeignKey, Integer, JSON, String, Text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.core.constants import FileAssetKind, ImportBatchStatus, PriceDocumentStatus
@@ -86,6 +87,9 @@ class PriceDocument(TimestampMixin, Base):
     last_error: Mapped[str | None] = mapped_column(Text)
     parsed_summary: Mapped[dict] = mapped_column(JSON, default=dict, nullable=False)
     warnings: Mapped[list[str]] = mapped_column(JSON, default=list, nullable=False)
+    processing_started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    processing_finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    parser_stage: Mapped[str | None] = mapped_column(String(64))
 
     import_batch: Mapped[ImportBatch] = relationship(back_populates="price_documents")
     file_asset: Mapped[FileAsset] = relationship(back_populates="price_document")

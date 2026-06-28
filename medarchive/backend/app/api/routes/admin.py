@@ -124,6 +124,10 @@ class PriceDocumentSummary(BaseModel):
     warnings: list[str]
     parsed_summary: dict
     file: FileAssetSummary | None = None
+    processing_started_at: datetime | None = None
+    processing_finished_at: datetime | None = None
+    duration_ms: int | None = None
+    parser_stage: str | None = None
 
 
 class PriceDocumentListResponse(BaseModel):
@@ -421,6 +425,19 @@ def enqueue_legacy_document_reprocess(price_document_id: UUID, db: Session = Dep
     return enqueue_document_reprocess(price_document_id, db)
 
 
+class RecoverStaleResponse(BaseModel):
+    recovered: int
+
+
+@router.post("/admin/documents/recover-stale", response_model=RecoverStaleResponse)
+def recover_stale_documents(
+    threshold_minutes: int = Query(10, ge=1, le=60),
+    db: Session = Depends(get_db),
+) -> RecoverStaleResponse:
+    recovered = WorkerPipelineService(db).recover_stale_documents(threshold_minutes)
+    return RecoverStaleResponse(recovered=recovered)
+
+
 @router.get("/admin/verification", response_model=VerificationListResponse)
 def list_verification(
     db: Session = Depends(get_db),
@@ -697,6 +714,9 @@ def file_summary(file_asset: FileAsset | None) -> FileAssetSummary | None:
 
 
 def document_summary(document: PriceDocument) -> PriceDocumentSummary:
+    duration_ms = None
+    if document.processing_started_at and document.processing_finished_at:
+        duration_ms = int((document.processing_finished_at - document.processing_started_at).total_seconds() * 1000)
     return PriceDocumentSummary(
         id=document.id,
         import_batch_id=document.import_batch_id,
@@ -709,6 +729,10 @@ def document_summary(document: PriceDocument) -> PriceDocumentSummary:
         warnings=document.warnings,
         parsed_summary=document.parsed_summary,
         file=file_summary(document.file_asset),
+        processing_started_at=document.processing_started_at,
+        processing_finished_at=document.processing_finished_at,
+        duration_ms=duration_ms,
+        parser_stage=document.parser_stage,
     )
 
 

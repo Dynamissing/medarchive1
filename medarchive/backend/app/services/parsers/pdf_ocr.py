@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -21,6 +22,8 @@ from app.services.parsers.pdf_text import (
 
 OCR_LANGUAGES = "rus+kaz+eng"
 LOW_CONFIDENCE_THRESHOLD = 0.55
+OCR_MAX_PAGES = 30
+OCR_TOTAL_TIMEOUT_SECONDS = 120
 
 
 class PdfOcrCandidateParser(DocumentParser):
@@ -98,6 +101,8 @@ def extract_pdf_with_ocr(path: Path) -> OcrExtraction:
     warnings: list[str] = []
     ocr_candidate = is_ocr_candidate_pdf(path)
     pages = ocr_pages(path)
+    if len(pages) >= OCR_MAX_PAGES:
+        warnings.append(f"OCR limited to first {OCR_MAX_PAGES} pages of document.")
     candidate_pages = [
         _page_to_pdf_text(page)
         for page in pages
@@ -150,7 +155,11 @@ def is_ocr_candidate_pdf(path: Path, min_text_chars_per_page: int = 25) -> bool:
 def ocr_pages(path: Path) -> list[OcrPageText]:
     images = convert_from_path(path, dpi=300)
     pages: list[OcrPageText] = []
-    for page_index, image in enumerate(images, start=1):
+    start_time = time.monotonic()
+    for page_index, image in enumerate(images[:OCR_MAX_PAGES], start=1):
+        elapsed = time.monotonic() - start_time
+        if elapsed > OCR_TOTAL_TIMEOUT_SECONDS:
+            break
         processed = preprocess_image(image)
         ocr_data = pytesseract.image_to_data(
             processed,

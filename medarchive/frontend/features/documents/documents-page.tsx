@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import { Eye, RefreshCcw } from "lucide-react";
+import { Eye, RefreshCcw, AlertTriangle } from "lucide-react";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -14,6 +14,7 @@ import {
   getDocuments,
   previewFile,
   reprocessDocument,
+  recoverStaleDocuments,
   type PriceDocumentDetail,
   type PriceDocumentSummary,
 } from "@/lib/api";
@@ -29,6 +30,12 @@ const statusOptions: Array<{ value: StatusFilter; labelKey: TranslationKey }> = 
   { value: "failed", labelKey: "common.failed" },
 ];
 
+function isStaleProcessing(doc: PriceDocumentSummary, thresholdMs = 5 * 60 * 1000): boolean {
+  if (doc.status !== "processing" || !doc.processing_started_at) return false;
+  const started = new Date(doc.processing_started_at).getTime();
+  return Date.now() - started > thresholdMs;
+}
+
 export function DocumentsPage() {
   const { t } = useI18n();
   const [status, setStatus] = useState<StatusFilter>("all");
@@ -39,15 +46,18 @@ export function DocumentsPage() {
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [detail, setDetail] = useState<PriceDocumentDetail | null>(null);
   const [detailLoading, setDetailLoading] = useState(false);
+  const [recoveringAll, setRecoveringAll] = useState(false);
+  const [totalDocs, setTotalDocs] = useState<number>(0);
 
   const refreshDocuments = useCallback(
     ({ showLoading, shouldUpdate = () => true }: { showLoading: boolean; shouldUpdate?: () => boolean }) => {
       if (showLoading) setLoading(true);
       setError(null);
-      return getDocuments({ status })
+      return getDocuments({ status, pageSize: 100 })
         .then((response) => {
           if (shouldUpdate()) {
             setRows(response.items);
+            setTotalDocs(response.meta.total);
             setSelectedId((current) => current ?? response.items[0]?.id ?? null);
           }
         })
@@ -135,6 +145,24 @@ export function DocumentsPage() {
     }
   }
 
+  const staleCount = rows.filter((doc) => isStaleProcessing(doc)).length;
+
+  async function handleRecoverAll() {
+    setRecoveringAll(true);
+    setError(null);
+    try {
+      const result = await recoverStaleDocuments(5);
+      await refreshDocuments({ showLoading: false });
+      if (result.recovered > 0) {
+        setStatus("all");
+      }
+    } catch (recoverError: unknown) {
+      setError(recoverError instanceof Error ? recoverError.message : "Recover stale failed");
+    } finally {
+      setRecoveringAll(false);
+    }
+  }
+
   return (
     <div className="grid gap-5 xl:grid-cols-[minmax(0,1fr)_430px]">
       {loading ? <ProcessingInProgress /> : null}
@@ -146,21 +174,37 @@ export function DocumentsPage() {
             <CardTitle>{t("documents.cardTitle")}</CardTitle>
             <CardDescription>{t("documents.desc")}</CardDescription>
           </div>
-          <Badge variant="neutral">{rows.length} {t("common.visible")}</Badge>
+          <div className="flex items-center gap-2">
+            <Badge variant="neutral">{totalDocs} total / {rows.length} shown</Badge>
+            {staleCount > 0 && (
+              <Button
+                type="button"
+                variant="destructive"
+                size="sm"
+                disabled={recoveringAll}
+                onClick={handleRecoverAll}
+              >
+                <AlertTriangle className="mr-1 h-4 w-4" />
+                {recoveringAll ? "Recovering..." : `Recover ${staleCount} stuck`}
+              </Button>
+            )}
+          </div>
         </CardHeader>
         <CardContent className="space-y-4">
-          <label className="flex max-w-56 flex-col gap-2">
-            <span className="text-xs font-medium uppercase text-muted-foreground">{t("common.status")}</span>
-            <select
-              className="h-9 rounded-md border border-input bg-background/65 px-3 text-sm text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-              value={status}
-              onChange={(event) => setStatus(event.target.value as StatusFilter)}
-            >
-              {statusOptions.map((option) => (
-                <option key={option.value} value={option.value}>{t(option.labelKey)}</option>
-              ))}
-            </select>
-          </label>
+          <div className="flex items-end gap-4">
+            <label className="flex max-w-56 flex-col gap-2">
+              <span className="text-xs font-medium uppercase text-muted-foreground">{t("common.status")}</span>
+              <select
+                className="h-9 rounded-md border border-input bg-background/65 px-3 text-sm text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                value={status}
+                onChange={(event) => setStatus(event.target.value as StatusFilter)}
+              >
+                {statusOptions.map((option) => (
+                  <option key={option.value} value={option.value}>{t(option.labelKey)}</option>
+                ))}
+              </select>
+            </label>
+          </div>
 
           <div className="table-shell">
             <Table>
@@ -249,6 +293,7 @@ export function DocumentsPage() {
           {detail ? (
             <>
               <MetricGrid summary={detail.parsed_summary} />
+              <TimingInfo detail={detail} />
               <DetailBlock title="Parser summary" value={detail.parsed_summary} />
               <DetailBlock title="Row samples" value={detail.parsed_summary.row_samples ?? []} />
               <DetailBlock title="Events" value={detail.events.slice(0, 8)} />
@@ -278,6 +323,32 @@ function MetricGrid({ summary }: { summary: Record<string, unknown> }) {
           <div className="mt-1 text-lg font-semibold text-foreground">{String(value ?? 0)}</div>
         </div>
       ))}
+    </div>
+  );
+}
+
+function TimingInfo({ detail }: { detail: PriceDocumentDetail }) {
+  const items: Array<[string, string]> = [];
+  if (detail.parser_stage) items.push(["Stage", detail.parser_stage]);
+  if (detail.duration_ms != null) items.push(["Duration", `${(detail.duration_ms / 1000).toFixed(1)}s`]);
+  if (detail.processing_started_at) items.push(["Started", new Date(detail.processing_started_at).toLocaleString()]);
+  if (detail.processing_finished_at) items.push(["Finished", new Date(detail.processing_finished_at).toLocaleString()]);
+  if (detail.status === "processing" && detail.processing_started_at) {
+    const elapsed = Date.now() - new Date(detail.processing_started_at).getTime();
+    items.push(["Elapsed", `${(elapsed / 1000).toFixed(0)}s`]);
+  }
+  if (!items.length) return null;
+  return (
+    <div className="rounded-md border border-border bg-background/45 p-3">
+      <h3 className="text-xs font-medium uppercase text-muted-foreground">Timing</h3>
+      <div className="mt-2 grid grid-cols-2 gap-2 text-sm">
+        {items.map(([label, value]) => (
+          <div key={label}>
+            <span className="text-muted-foreground">{label}: </span>
+            <span className="font-medium text-foreground">{value}</span>
+          </div>
+        ))}
+      </div>
     </div>
   );
 }

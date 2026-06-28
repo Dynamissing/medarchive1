@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import time
 from dataclasses import dataclass
+from datetime import UTC, datetime, timedelta
 from uuid import UUID
 
 from sqlalchemy import select
@@ -87,10 +89,14 @@ class WorkerPipelineService:
             self.db.commit()
             return DocumentProcessingOutcome(document.id, document.status, document.parsed_summary)
 
+        started_at = datetime.now(UTC)
         document.status = PriceDocumentStatus.PROCESSING.value
         document.progress_percent = 10
         document.processing_attempts += 1
         document.last_error = None
+        document.processing_started_at = started_at
+        document.processing_finished_at = None
+        document.parser_stage = "starting"
         self.log_event(
             event_type="document_processing_started",
             status=ProcessingStatus.RUNNING.value,
@@ -103,14 +109,34 @@ class WorkerPipelineService:
         self.db.flush()
 
         try:
+            document.parser_stage = "parsing"
+            document.progress_percent = 15
+            self.db.flush()
+            parse_start = time.monotonic()
             parsed = self.document_processor.parse_price_document(document)
+            parse_ms = int((time.monotonic() - parse_start) * 1000)
+
+            document.parser_stage = "normalizing"
+            document.progress_percent = 40
+            self.db.flush()
+
             summary = self.process_parsed_result(document, parsed)
+            summary["parse_duration_ms"] = parse_ms
+
+            document.parser_stage = "completed"
+            document.progress_percent = 100
             document.status = (
                 PriceDocumentStatus.PARSED.value
                 if summary["normalized_rows"] > 0
                 else PriceDocumentStatus.NEEDS_REVIEW.value
             )
-            document.progress_percent = 100
+            finished_at = datetime.now(UTC)
+            document.processing_finished_at = finished_at
+            duration_ms = int((finished_at - started_at).total_seconds() * 1000)
+            summary["processing_started_at"] = started_at.isoformat()
+            summary["processing_finished_at"] = finished_at.isoformat()
+            summary["duration_ms"] = duration_ms
+            summary["parser_stage"] = "completed"
             document.parsed_summary = summary
             document.warnings = list(parsed.warnings)
             self.log_event(
@@ -130,6 +156,9 @@ class WorkerPipelineService:
 
     def process_parsed_result(self, document: PriceDocument, parsed: ParsedDocumentResult) -> dict:
         rows = normalize_parsed_rows(document, parsed)
+        document.parser_stage = "matching"
+        document.progress_percent = 60
+        self.db.flush()
         history_service = PriceHistoryService(self.db)
         matching_engine = LayeredMatchingEngine(self.db)
         auto_matched = 0
@@ -139,7 +168,7 @@ class WorkerPipelineService:
         normalization_warnings: list[str] = []
         row_samples: list[dict] = []
 
-        for row in rows:
+        for i, row in enumerate(rows):
             normalization_warnings.extend(row.warnings)
             match = matching_engine.match_row(row, persist_review=True, price_document_id=document.id)
             service_id = match.candidates[0].service_id if match.candidates and match.decision_status == MatchDecisionStatus.AUTO_ACCEPT else None
@@ -151,6 +180,9 @@ class WorkerPipelineService:
                 unmatched += 1
             versions = history_service.validate_and_record(row, service_id=service_id, price_document_id=document.id)
             recorded_price_items += len(versions)
+            if len(rows) > 0 and i % max(1, len(rows) // 4) == 0:
+                document.progress_percent = min(80, 60 + int((i / len(rows)) * 20))
+                self.db.flush()
             if len(row_samples) < ROW_SAMPLE_LIMIT:
                 row_samples.append(
                     {
@@ -210,10 +242,22 @@ class WorkerPipelineService:
 
     def fail_document(self, document: PriceDocument, exc: Exception) -> DocumentProcessingOutcome:
         message = str(exc)
+        finished_at = datetime.now(UTC)
         document.status = PriceDocumentStatus.FAILED.value
         document.progress_percent = 100
         document.last_error = message
-        document.parsed_summary = {}
+        document.processing_finished_at = finished_at
+        document.parser_stage = "failed"
+        duration_ms = None
+        if document.processing_started_at:
+            duration_ms = int((finished_at - document.processing_started_at).total_seconds() * 1000)
+        document.parsed_summary = {
+            "processing_started_at": document.processing_started_at.isoformat() if document.processing_started_at else None,
+            "processing_finished_at": finished_at.isoformat(),
+            "duration_ms": duration_ms,
+            "parser_stage": "failed",
+            "error_type": type(exc).__name__,
+        }
         warnings = list(document.warnings or [])
         warnings.append(message)
         document.warnings = warnings
@@ -238,6 +282,9 @@ class WorkerPipelineService:
         document.progress_percent = 0
         document.last_error = None
         document.parsed_summary = {}
+        document.processing_started_at = None
+        document.processing_finished_at = None
+        document.parser_stage = None
         self.log_event(
             event_type="document_reprocess_requested",
             status=ProcessingStatus.PENDING.value,
@@ -248,6 +295,36 @@ class WorkerPipelineService:
         )
         self.refresh_batch_progress(document.import_batch_id)
         self.db.commit()
+
+    def recover_stale_documents(self, stale_threshold_minutes: int = 10) -> int:
+        threshold = datetime.now(UTC) - timedelta(minutes=stale_threshold_minutes)
+        stale_documents = self.db.scalars(
+            select(PriceDocument).where(
+                PriceDocument.status == PriceDocumentStatus.PROCESSING.value,
+                PriceDocument.created_at < threshold,
+            )
+        ).all()
+        recovered = 0
+        for document in stale_documents:
+            document.status = PriceDocumentStatus.PENDING.value
+            document.progress_percent = 0
+            document.last_error = None
+            document.parsed_summary = {}
+            document.processing_started_at = None
+            document.processing_finished_at = None
+            document.parser_stage = None
+            self.log_event(
+                event_type="document_stale_recovery",
+                status=ProcessingStatus.PENDING.value,
+                message=f"Document recovered from stale processing (stuck for >{stale_threshold_minutes}min).",
+                import_batch_id=document.import_batch_id,
+                price_document_id=document.id,
+                progress_percent=0,
+            )
+            self.refresh_batch_progress(document.import_batch_id)
+            recovered += 1
+        self.db.commit()
+        return recovered
 
     def refresh_batch_progress(self, import_batch_id: UUID) -> None:
         batch = self.db.get(ImportBatch, import_batch_id)

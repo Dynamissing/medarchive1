@@ -94,6 +94,10 @@ export type PriceDocumentSummary = {
   warnings: string[];
   parsed_summary: Record<string, unknown>;
   file: FileAssetSummary | null;
+  processing_started_at: string | null;
+  processing_finished_at: string | null;
+  duration_ms: number | null;
+  parser_stage: string | null;
 };
 
 export type ProcessingEventSummary = {
@@ -268,6 +272,14 @@ export function getDocument(priceDocumentId: string) {
 
 export function reprocessDocument(priceDocumentId: string) {
   return apiFetch<{ task_id: string; target_id: string; target_type: string }>(`/admin/documents/${priceDocumentId}/reprocess`, {
+    method: "POST",
+    auth: true,
+  });
+}
+
+export function recoverStaleDocuments(thresholdMinutes?: number) {
+  const params = thresholdMinutes ? `?threshold_minutes=${thresholdMinutes}` : "";
+  return apiFetch<{ recovered: number }>(`/admin/documents/recover-stale${params}`, {
     method: "POST",
     auth: true,
   });

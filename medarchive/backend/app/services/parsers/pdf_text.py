@@ -60,17 +60,22 @@ class PdfExtraction:
     warnings: list[str]
 
 
+PDFPLUMBER_MAX_PAGES = 50
+
+
 def extract_pdf_text(path: Path) -> PdfExtraction:
     warnings: list[str] = []
     pages = extract_pages_with_pymupdf(path)
     if not any(page.raw_text.strip() for page in pages):
         warnings.append("PyMuPDF produced no text; pdfplumber fallback was used.")
-        pages = extract_pages_with_pdfplumber(path)
+        pages = extract_pages_with_pdfplumber(path, max_pages=PDFPLUMBER_MAX_PAGES)
     elif extraction_text_length(pages) < 50:
-        fallback_pages = extract_pages_with_pdfplumber(path)
-        if extraction_text_length(fallback_pages) > extraction_text_length(pages):
-            warnings.append("pdfplumber fallback produced more text than PyMuPDF.")
+        fallback_pages = extract_pages_with_pdfplumber(path, max_pages=PDFPLUMBER_MAX_PAGES)
+        if extraction_text_length(fallback_pages) > extraction_text_length(pages) * 2:
+            warnings.append("pdfplumber fallback produced significantly more text than PyMuPDF.")
             pages = fallback_pages
+    if len(pages) >= PDFPLUMBER_MAX_PAGES:
+        warnings.append(f"PDF has {len(pages)}+ pages; only first {PDFPLUMBER_MAX_PAGES} processed.")
 
     row_candidates = build_pdf_row_candidates(pages)
     confidence = score_confidence(pages, row_candidates)
@@ -123,10 +128,10 @@ def merge_positioned_lines(positioned: list[tuple[float, float, str]], y_toleran
     return normalize_lines(merged)
 
 
-def extract_pages_with_pdfplumber(path: Path) -> list[PdfPageText]:
+def extract_pages_with_pdfplumber(path: Path, max_pages: int = 50) -> list[PdfPageText]:
     pages: list[PdfPageText] = []
     with pdfplumber.open(path) as document:
-        for page_index, page in enumerate(document.pages, start=1):
+        for page_index, page in enumerate(document.pages[:max_pages], start=1):
             raw_text = page.extract_text(x_tolerance=1, y_tolerance=3) or ""
             pages.append(
                 PdfPageText(
